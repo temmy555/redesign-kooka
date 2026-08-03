@@ -1,0 +1,8 @@
+.next/
+coverage/
+drizzle/
+node_modules/
+outputs/
+src/db/schema/
+work/
+

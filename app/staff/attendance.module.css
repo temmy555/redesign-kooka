@@ -1,0 +1,1113 @@
+.attendancePage {
+  --attendance-green: #123f35;
+  --attendance-sage: #6f8974;
+  --attendance-coral: #c76145;
+  color: var(--attendance-green);
+}
+
+.attendanceHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 26px;
+}
+
+.eyebrow,
+.viewHeading > div > span,
+.sectionHeading > div > span {
+  color: #78846e;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.attendanceHeader h1 {
+  margin: 9px 0 7px;
+  font-family: var(--serif);
+  font-size: clamp(42px, 5vw, 70px);
+  font-weight: 400;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+}
+
+.attendanceHeader p {
+  margin: 0;
+  color: #718078;
+  font-size: 13px;
+}
+
+.freeMode,
+.monthPill {
+  display: inline-flex;
+  min-height: 37px;
+  align-items: center;
+  border: 1px solid rgba(18, 63, 53, 0.13);
+  border-radius: 999px;
+  padding: 0 15px;
+  background: #e4e9df;
+  color: #486056;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.desktopTabs {
+  display: inline-flex;
+  gap: 5px;
+  margin-bottom: 24px;
+  border: 1px solid rgba(18, 63, 53, 0.1);
+  border-radius: 12px;
+  padding: 5px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.desktopTabs button,
+.mobileTabs button {
+  display: inline-flex;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: #718078;
+  font: inherit;
+}
+
+.desktopTabs button {
+  min-height: 44px;
+  align-items: center;
+  gap: 9px;
+  border-radius: 8px;
+  padding: 0 18px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.desktopTabs svg,
+.mobileTabs svg,
+.cameraActions svg {
+  width: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.desktopTabs .tabActive {
+  background: var(--attendance-green);
+  color: white;
+}
+
+.clockView {
+  display: grid;
+  gap: 18px;
+}
+
+.statusHero {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.65fr) minmax(260px, 1.35fr);
+  align-items: center;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 27px 30px;
+  background:
+    radial-gradient(
+      circle at 82% 15%,
+      rgba(220, 228, 210, 0.17),
+      transparent 28%
+    ),
+    var(--attendance-green);
+  color: white;
+}
+
+.statusHero > span {
+  grid-column: 1;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.statusHero > strong {
+  grid-column: 1;
+  margin-top: 8px;
+  font-family: var(--serif);
+  font-size: clamp(28px, 3.4vw, 46px);
+  font-weight: 400;
+}
+
+.todayTimeline {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  display: grid;
+  grid-template-columns: 1fr minmax(34px, 0.35fr) 1fr;
+  align-items: center;
+}
+
+.todayTimeline div {
+  display: grid;
+  gap: 5px;
+  text-align: center;
+}
+
+.todayTimeline small {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 9px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.todayTimeline b {
+  font-family: var(--serif);
+  font-size: 30px;
+  font-weight: 400;
+}
+
+.todayTimeline > span {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.captureGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+  gap: 18px;
+}
+
+.cameraCard,
+.locationCard,
+.historyView,
+.reportView,
+.completedCard {
+  overflow: hidden;
+  border: 1px solid rgba(18, 63, 53, 0.11);
+  border-radius: 16px;
+  background: rgba(255, 253, 248, 0.9);
+  box-shadow: 0 12px 40px rgba(24, 53, 45, 0.035);
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px 18px;
+}
+
+.sectionHeading h2 {
+  margin: 5px 0 0;
+  font-size: 20px;
+}
+
+.miniStatus {
+  display: inline-flex;
+  min-height: 29px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 11px;
+  background: #efe7dd;
+  color: #8a6958;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.miniStatus::before {
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.statusOkay {
+  background: #e2ebdf;
+  color: #487253;
+}
+
+.cameraViewport {
+  position: relative;
+  min-height: 390px;
+  overflow: hidden;
+  background: #183c34;
+}
+
+.cameraViewport video,
+.cameraViewport img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.cameraViewport img {
+  transform: none;
+}
+
+.cameraFallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 30px;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: center;
+}
+
+.cameraFallback svg {
+  width: 43px;
+  margin-bottom: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+
+.cameraFallback strong {
+  font-family: var(--serif);
+  font-size: 23px;
+  font-weight: 400;
+}
+
+.cameraFallback p {
+  max-width: 290px;
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.faceGuide {
+  position: absolute;
+  width: min(50%, 230px);
+  aspect-ratio: 0.78;
+  top: 50%;
+  left: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 48% 48% 42% 42%;
+  box-shadow: 0 0 0 999px rgba(8, 30, 25, 0.1);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.cameraActions {
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 14px 20px;
+}
+
+.cameraActions button,
+.locationRetry,
+.exportButton {
+  display: inline-flex;
+  min-height: 44px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 17px;
+  background: var(--attendance-green);
+  color: white;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.cameraActions > span {
+  color: #5f756a;
+  font-size: 10px;
+}
+
+.cameraActions .cameraStopButton {
+  border: 1px solid rgba(18, 63, 53, 0.24);
+  background: transparent;
+  color: var(--attendance-green);
+}
+
+.locationMap {
+  display: grid;
+  min-height: 250px;
+  place-items: center;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      34deg,
+      transparent 48%,
+      rgba(18, 63, 53, 0.06) 49%,
+      rgba(18, 63, 53, 0.06) 52%,
+      transparent 53%
+    ),
+    linear-gradient(
+      120deg,
+      transparent 43%,
+      rgba(18, 63, 53, 0.05) 44%,
+      rgba(18, 63, 53, 0.05) 48%,
+      transparent 49%
+    ),
+    #e7eadf;
+}
+
+.mapRings {
+  position: relative;
+  display: grid;
+  width: 190px;
+  height: 190px;
+  place-items: center;
+}
+
+.mapRings > span {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(92, 131, 94, 0.09);
+}
+
+.mapRings > span:nth-child(1) {
+  width: 190px;
+  height: 190px;
+}
+
+.mapRings > span:nth-child(2) {
+  width: 120px;
+  height: 120px;
+  background: rgba(92, 131, 94, 0.14);
+}
+
+.mapRings > span:nth-child(3) {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  background: var(--attendance-green);
+  box-shadow: 0 12px 28px rgba(18, 63, 53, 0.24);
+  color: white;
+}
+
+.mapRings svg {
+  width: 25px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+}
+
+.locationDetail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 21px 24px 24px;
+}
+
+.locationDetail span,
+.locationDetail strong,
+.locationDetail small,
+.accuracyBadge span,
+.accuracyBadge strong {
+  display: block;
+}
+
+.locationDetail span,
+.accuracyBadge span {
+  color: #879087;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.locationDetail strong {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.locationDetail small {
+  max-width: 320px;
+  margin-top: 5px;
+  color: #78847e;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.accuracyBadge {
+  flex: 0 0 auto;
+  border-left: 1px solid rgba(18, 63, 53, 0.11);
+  padding-left: 18px;
+}
+
+.accuracyBadge strong {
+  margin-top: 5px;
+  font-family: var(--serif);
+  font-size: 21px;
+  font-weight: 400;
+}
+
+.locationRetry {
+  width: calc(100% - 48px);
+  margin: 0 24px 24px;
+}
+
+.attendanceActionBar {
+  position: sticky;
+  z-index: 5;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  border: 1px solid rgba(18, 63, 53, 0.12);
+  border-radius: 14px;
+  padding: 14px 14px 14px 22px;
+  background: rgba(255, 253, 248, 0.94);
+  box-shadow: 0 18px 55px rgba(22, 51, 43, 0.15);
+  backdrop-filter: blur(16px);
+}
+
+.attendanceActionBar > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  color: #65766e;
+  font-size: 10px;
+}
+
+.attendanceActionBar > button {
+  min-width: 210px;
+  min-height: 54px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 9px;
+  background: var(--attendance-coral);
+  color: white;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.attendanceActionBar > button:disabled {
+  cursor: not-allowed;
+  background: #cbd0c7;
+  color: #7b847d;
+}
+
+.prototypeNote {
+  margin: 0;
+  color: #879088;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.completedCard {
+  display: flex;
+  min-height: 280px;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 40px;
+}
+
+.completedCard > span {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #dfeade;
+  color: #467252;
+  font-size: 26px;
+}
+
+.completedCard h2 {
+  margin: 0 0 8px;
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 400;
+}
+
+.completedCard p {
+  margin: 0;
+  color: #718078;
+  font-size: 12px;
+}
+
+.historyView,
+.reportView {
+  padding: 28px;
+}
+
+.viewHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.viewHeading h2 {
+  margin: 7px 0 6px;
+  font-family: var(--serif);
+  font-size: clamp(30px, 3.5vw, 48px);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+}
+
+.viewHeading p {
+  margin: 0;
+  color: #78847e;
+  font-size: 11px;
+}
+
+.historyList {
+  display: grid;
+  gap: 9px;
+}
+
+.historyList article {
+  display: grid;
+  grid-template-columns: minmax(200px, 0.9fr) minmax(300px, 1.4fr) minmax(
+      170px,
+      0.7fr
+    );
+  align-items: center;
+  gap: 20px;
+  border: 1px solid rgba(18, 63, 53, 0.09);
+  border-radius: 11px;
+  padding: 17px 20px;
+  background: #faf8f2;
+}
+
+.historyDate span,
+.historyDate strong {
+  display: block;
+}
+
+.historyDate span {
+  color: #7c8982;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.historyDate strong {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.historyTimes {
+  display: grid;
+  grid-template-columns: 1fr 28px 1fr;
+  align-items: center;
+}
+
+.historyTimes span {
+  color: #879088;
+  font-size: 9px;
+  text-align: center;
+}
+
+.historyTimes strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--attendance-green);
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
+}
+
+.historyTimes i {
+  height: 1px;
+  background: #d7dbd3;
+}
+
+.historyResult {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.present,
+.missing {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #dfe9dc;
+  color: #476f50;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.missing {
+  background: #f2dfd9;
+  color: #984d3a;
+}
+
+.historyResult > strong {
+  color: #65756e;
+  font-size: 10px;
+}
+
+.exportButton {
+  min-width: 130px;
+}
+
+.reportView {
+  overflow: visible;
+}
+
+.reportFilters {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.dateRangeFilter {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.dateRangeFilter label {
+  display: grid;
+  gap: 7px;
+}
+
+.dateRangeFilter label > span {
+  color: #78847e;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dateRangeSeparator {
+  display: grid;
+  min-height: 54px;
+  place-items: center;
+  color: #8a948e;
+}
+
+.applyDateFilter {
+  min-height: 54px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 20px;
+  background: var(--attendance-green);
+  color: white;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.applyDateFilter:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.reportSearch {
+  display: flex;
+  min-width: 230px;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  border: 1px solid rgba(18, 63, 53, 0.11);
+  border-radius: 9px;
+  padding: 0 12px;
+  background: white;
+}
+
+.reportSearch input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--attendance-green);
+  font: inherit;
+  font-size: 10px;
+}
+
+.reportMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.reportMetrics article {
+  border-radius: 11px;
+  padding: 18px;
+  background: #e9ece4;
+}
+
+.reportMetrics span,
+.reportMetrics strong,
+.reportMetrics small {
+  display: block;
+}
+
+.reportMetrics span {
+  color: #78847e;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reportMetrics strong {
+  margin: 13px 0 7px;
+  font-family: var(--serif);
+  font-size: 34px;
+  font-weight: 400;
+}
+
+.reportMetrics small {
+  color: #859089;
+  font-size: 8px;
+}
+
+.reportTableWrap {
+  overflow-x: auto;
+  margin-bottom: 14px;
+  border: 1px solid rgba(18, 63, 53, 0.09);
+  border-radius: 11px;
+}
+
+.reportTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.reportTable th,
+.reportTable td {
+  padding: 15px 16px;
+  border-bottom: 1px solid rgba(18, 63, 53, 0.08);
+  color: #54675e;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reportTable th {
+  background: #f0f0e9;
+  color: #849087;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reportTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.reportTable td strong,
+.reportTable td small {
+  display: block;
+}
+
+.reportTable td strong {
+  color: var(--attendance-green);
+  font-size: 11px;
+}
+
+.reportTable td small {
+  margin-top: 4px;
+  color: #8a948e;
+  font-size: 8px;
+}
+
+.mobileTabs {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  .captureGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .cameraViewport {
+    min-height: 480px;
+  }
+
+  .reportMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reportFilters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reportSearch {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .attendancePage {
+    margin: -30px -20px -54px;
+    padding: 24px 16px calc(104px + env(safe-area-inset-bottom));
+    background: #f3f0e8;
+  }
+
+  .attendanceHeader {
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+
+  .attendanceHeader h1 {
+    max-width: 230px;
+    font-size: 40px;
+  }
+
+  .attendanceHeader p {
+    max-width: 230px;
+    font-size: 11px;
+  }
+
+  .freeMode {
+    min-height: 31px;
+    padding: 0 11px;
+    font-size: 8px;
+  }
+
+  .desktopTabs {
+    display: none;
+  }
+
+  .statusHero {
+    grid-template-columns: 1fr;
+    padding: 22px;
+  }
+
+  .statusHero > span,
+  .statusHero > strong,
+  .todayTimeline {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .statusHero > strong {
+    font-size: 31px;
+  }
+
+  .todayTimeline {
+    margin-top: 23px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.13);
+  }
+
+  .todayTimeline b {
+    font-size: 25px;
+  }
+
+  .captureGrid {
+    gap: 14px;
+  }
+
+  .cameraCard,
+  .locationCard,
+  .historyView,
+  .reportView,
+  .completedCard {
+    border-radius: 14px;
+  }
+
+  .sectionHeading {
+    padding: 18px 17px 15px;
+  }
+
+  .sectionHeading h2 {
+    font-size: 18px;
+  }
+
+  .cameraViewport {
+    min-height: 390px;
+  }
+
+  .cameraActions {
+    flex-direction: column;
+  }
+
+  .cameraActions button {
+    width: 100%;
+  }
+
+  .locationMap {
+    min-height: 220px;
+  }
+
+  .locationDetail {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 18px;
+  }
+
+  .accuracyBadge {
+    width: 100%;
+    border-top: 1px solid rgba(18, 63, 53, 0.09);
+    border-left: 0;
+    padding-top: 14px;
+    padding-left: 0;
+  }
+
+  .locationRetry {
+    width: calc(100% - 36px);
+    margin: 0 18px 18px;
+  }
+
+  .attendanceActionBar {
+    position: static;
+    align-items: stretch;
+    flex-direction: column;
+    padding: 17px;
+  }
+
+  .attendanceActionBar > div {
+    display: grid;
+    gap: 7px;
+  }
+
+  .attendanceActionBar > button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .historyView,
+  .reportView {
+    padding: 18px 14px;
+  }
+
+  .viewHeading {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 21px;
+  }
+
+  .viewHeading h2 {
+    font-size: 34px;
+  }
+
+  .historyList article {
+    grid-template-columns: 1fr auto;
+    gap: 15px;
+    padding: 15px;
+  }
+
+  .historyTimes {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-top: 13px;
+    border-top: 1px solid rgba(18, 63, 53, 0.08);
+  }
+
+  .historyResult {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .reportFilters {
+    gap: 12px;
+  }
+
+  .dateRangeFilter {
+    grid-template-columns: 1fr;
+  }
+
+  .dateRangeSeparator {
+    display: none;
+  }
+
+  .applyDateFilter {
+    width: 100%;
+  }
+
+  .reportSearch {
+    width: 100%;
+    margin-top: 4px;
+    margin-left: 0;
+  }
+
+  .reportMetrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .reportMetrics article {
+    padding: 15px;
+  }
+
+  .reportMetrics strong {
+    font-size: 29px;
+  }
+
+  .mobileTabs {
+    position: fixed;
+    z-index: 50;
+    right: 12px;
+    bottom: 10px;
+    left: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    min-height: 67px;
+    border: 1px solid rgba(18, 63, 53, 0.15);
+    border-radius: 18px;
+    padding: 7px max(7px, env(safe-area-inset-right))
+      calc(7px + env(safe-area-inset-bottom))
+      max(7px, env(safe-area-inset-left));
+    background: rgba(255, 253, 248, 0.96);
+    box-shadow: 0 18px 55px rgba(13, 46, 39, 0.23);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobileTabs button {
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 4px;
+    border-radius: 12px;
+    font-size: 8px;
+    font-weight: 800;
+  }
+
+  .mobileTabs svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .mobileTabs .mobileTabActive {
+    background: var(--attendance-green);
+    color: white;
+  }
+
+  .completedCard {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 30px 24px;
+  }
+}

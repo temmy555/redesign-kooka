@@ -1,0 +1,196 @@
+{
+  "generatedAt": "2026-08-03T15:26:13.030Z",
+  "sourceProvider": "Agoda",
+  "assetCount": 27,
+  "assets": [
+    {
+      "id": "room-generic-01",
+      "width": 576,
+      "height": 768,
+      "bytes": 61155,
+      "sha256": "c7506795b93b6442dfd5035d1a53b62566742e23c5059e8db598da8d43977450"
+    },
+    {
+      "id": "room-two-bedroom-villa-bed",
+      "width": 1024,
+      "height": 771,
+      "bytes": 116669,
+      "sha256": "ab25994ccb3b33e1b075bff1b003097ac71a80cf7dfe5ab7eb9936f2a3d1eded"
+    },
+    {
+      "id": "room-generic-02",
+      "width": 576,
+      "height": 768,
+      "bytes": 50655,
+      "sha256": "e54d867833a57b22027ae8bac681ad4199c7d0eaddb6eb25063d10f1771b8297"
+    },
+    {
+      "id": "room-generic-03",
+      "width": 1024,
+      "height": 576,
+      "bytes": 71013,
+      "sha256": "de0d453cd79d2420efbcd2801bd9ad34b60f2fc983b4f0d73c116ecb13572b61"
+    },
+    {
+      "id": "room-mezzanine-guestroom",
+      "width": 1024,
+      "height": 1365,
+      "bytes": 182028,
+      "sha256": "417a77946506efb722b09cd40e5c56a500fd0646d49735afb16f4c44625e51ae"
+    },
+    {
+      "id": "room-two-bedroom-villa-interior",
+      "width": 1024,
+      "height": 1365,
+      "bytes": 156273,
+      "sha256": "ab3a107141b521624f8f99856097cfe5f53e744440195d863ad50f13ce05540e"
+    },
+    {
+      "id": "room-mezzanine-bed",
+      "width": 1024,
+      "height": 768,
+      "bytes": 74355,
+      "sha256": "77227511b7c2dd3ebbcb1f7148d4a6b43fc6dfc92b86c564b9d28e950d252ab9"
+    },
+    {
+      "id": "property-entrance",
+      "width": 1024,
+      "height": 768,
+      "bytes": 177355,
+      "sha256": "fd6b07fed1cf6593da86ddd835984f69e4aa9a5670f303208e09fe6a1d4b23af"
+    },
+    {
+      "id": "property-exterior-01",
+      "width": 576,
+      "height": 768,
+      "bytes": 78965,
+      "sha256": "d5591b3f663151ba6d2b67bd44918f38593423315c6f98bd90fd9f691a3b7c5b"
+    },
+    {
+      "id": "property-exterior-02",
+      "width": 576,
+      "height": 768,
+      "bytes": 73105,
+      "sha256": "5e5ca4df9632529b86189efab253f180fac1ff8f87b0d5fc79020a9bdaa18fbe"
+    },
+    {
+      "id": "property-exterior-03",
+      "width": 576,
+      "height": 768,
+      "bytes": 82102,
+      "sha256": "622add7f327bb301666bc8a568483894ef91e37b915e91788b3659ff8a0003c8"
+    },
+    {
+      "id": "property-exterior-04",
+      "width": 1024,
+      "height": 768,
+      "bytes": 163717,
+      "sha256": "c1abef5c926555b0bb075b5e50c62bc0b808c44f589d33b33581ee8cdc386c61"
+    },
+    {
+      "id": "property-exterior-05",
+      "width": 576,
+      "height": 768,
+      "bytes": 76484,
+      "sha256": "9d6e5ca2fba0cd98a3221d2fa65cf7610f865c77f314d6c1381463cc280098ce"
+    },
+    {
+      "id": "property-exterior-06",
+      "width": 1024,
+      "height": 472,
+      "bytes": 56991,
+      "sha256": "c8e1dfa73804bc8d8e0bfa08fffb60ab543aaf3f08b303bfb396eec5e74e9d9c"
+    },
+    {
+      "id": "facility-bedroom-01",
+      "width": 1024,
+      "height": 775,
+      "bytes": 82880,
+      "sha256": "df881a0e3d1d123a4255eab31cab250ba3e4862efa90049f5cce90b04b6375e8"
+    },
+    {
+      "id": "facility-balcony-01",
+      "width": 1024,
+      "height": 768,
+      "bytes": 186314,
+      "sha256": "05fc99ccb0fc1996194fe3b85fa3c81ae4854e4f4cb76d933aa48f476eeedcad"
+    },
+    {
+      "id": "facility-balcony-02",
+      "width": 1024,
+      "height": 1365,
+      "bytes": 266003,
+      "sha256": "5678f73c4a7a053a938e28187f7938a88c08fa5f09dfbb9db0f81d91d4022b35"
+    },
+    {
+      "id": "facility-balcony-03",
+      "width": 1024,
+      "height": 1365,
+      "bytes": 216981,
+      "sha256": "5da45b775d89fb171c36833a225f4180a31a45f1809bbceb6489e6e77ec91a93"
+    },
+    {
+      "id": "facility-balcony-04",
+      "width": 1024,
+      "height": 1365,
+      "bytes": 334625,
+      "sha256": "988357a3776b46afe6a7f8fa8397ce25e3a658ff16c592763840274d3d281211"
+    },
+    {
+      "id": "facility-garden",
+      "width": 1024,
+      "height": 768,
+      "bytes": 176429,
+      "sha256": "a9573262a3730f51946f039e749cc73dbe711a237ccf0adec92f975588a9f37b"
+    },
+    {
+      "id": "facility-guest-room-amenity",
+      "width": 1024,
+      "height": 576,
+      "bytes": 70771,
+      "sha256": "d2a02183c17c9d47a92027a23972f1cd7672414a9b56c4b24e753079939a6df7"
+    },
+    {
+      "id": "facility-bedroom-02",
+      "width": 1024,
+      "height": 1362,
+      "bytes": 99370,
+      "sha256": "7e17522b45acffd108c672abad8ffac32ab368f7d42dbd9871890c78131138a3"
+    },
+    {
+      "id": "facility-bedroom-03",
+      "width": 1024,
+      "height": 1365,
+      "bytes": 153283,
+      "sha256": "aaa3f36bbee9a8b1ee516c94a8a378ba593052bae3338a21efa41d49a628bcb2"
+    },
+    {
+      "id": "facility-shower",
+      "width": 576,
+      "height": 768,
+      "bytes": 57562,
+      "sha256": "78b2584b252e8fd37aff76052e0ff9eb59bd608f3345f1cd0ce6847a42695b3b"
+    },
+    {
+      "id": "facility-bathroom",
+      "width": 1024,
+      "height": 1820,
+      "bytes": 211958,
+      "sha256": "23453a4acbc6b5114391bf75288c47ba5bcbfc6c44b366481802dc531410aef1"
+    },
+    {
+      "id": "facility-bedroom-04",
+      "width": 1024,
+      "height": 1823,
+      "bytes": 96687,
+      "sha256": "d876cdefcb4f9f76136ad02f8d5d69ee34aa47a88500426c773eba64494c8408"
+    },
+    {
+      "id": "dining-food-beverages",
+      "width": 1024,
+      "height": 472,
+      "bytes": 83276,
+      "sha256": "d08e560de34ee23ee827dc64624eeaf3bc96ef3b3ed9f72fbef62a074e486166"
+    }
+  ]
+}

@@ -1,0 +1,333 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "provider": "Agoda",
+    "propertyName": "KOOKA Residence Surabaya",
+    "url": "https://www.agoda.com/kooka-residence-surabaya/hotel/surabaya-id.html",
+    "capturedAt": "2026-08-03T00:00:00+07:00",
+    "usage": "Public catalog reference only; not an operational inventory or pricing source"
+  },
+  "property": {
+    "name": "KOOKA Residence Surabaya",
+    "address": "Darmo Permai Selatan XVI no 28, Dukuh Pakis, Surabaya, Indonesia, 60226",
+    "publicRating": 10,
+    "publicReviewCount": 2,
+    "listingStarClass": 4,
+    "listingHighlights": [
+      "24-hour front desk",
+      "Free Wi-Fi in all rooms",
+      "Free parking",
+      "Garden"
+    ],
+    "listingRoomCount": 3,
+    "operationalVerificationRequired": true,
+    "notes": [
+      "The Agoda room count must not replace the project's physical room-unit inventory.",
+      "Dynamic prices, availability, and the Agoda breakfast statement are intentionally not imported.",
+      "The project decision remains room-only, with food and beverages ordered separately."
+    ]
+  },
+  "roomTypes": [
+    {
+      "code": "MEZZANINE-3-ADULTS",
+      "nameId": "Kamar Mezzanine — 3 Tamu",
+      "nameEn": "Mezzanine — 3 Adults",
+      "maximumAdults": 3,
+      "maximumTotalGuests": 3,
+      "bedConfiguration": null,
+      "verifiedFromListing": true,
+      "requiresOperationalVerification": true,
+      "assetIds": ["room-mezzanine-guestroom", "room-mezzanine-bed"]
+    },
+    {
+      "code": "TWO-BEDROOM-VILLA",
+      "nameId": "Vila 2 Kamar Tidur",
+      "nameEn": "2 Bedroom Villa",
+      "maximumAdults": null,
+      "maximumTotalGuests": null,
+      "bedConfiguration": null,
+      "verifiedFromListing": true,
+      "requiresOperationalVerification": true,
+      "assetIds": [
+        "room-two-bedroom-villa-bed",
+        "room-two-bedroom-villa-interior"
+      ]
+    }
+  ],
+  "unverifiedRoomTypes": {
+    "countShownByListing": 4,
+    "reason": "The selected date was sold out and Agoda did not expose reliable names, capacity, or rate-plan details for the remaining room types."
+  },
+  "assets": [
+    {
+      "id": "room-generic-01",
+      "category": "rooms",
+      "label": "Room view",
+      "altId": "Interior kamar KOOKA Residence Surabaya",
+      "altEn": "Room interior at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890696239.jpg?k=bfc81a568ad370204832b809e2d63ef360509b89fad68d58b35422d0968b506a&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/room-generic-01.jpg"
+    },
+    {
+      "id": "room-two-bedroom-villa-bed",
+      "category": "rooms",
+      "label": "2 Bedroom Villa - Bed",
+      "altId": "Tempat tidur di Vila 2 Kamar Tidur KOOKA",
+      "altEn": "Bed in the KOOKA 2 Bedroom Villa",
+      "roomTypeCode": "TWO-BEDROOM-VILLA",
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/1432931530/349d70f825254aea15b366e219d40d1a.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/room-two-bedroom-villa-bed.jpg"
+    },
+    {
+      "id": "room-generic-02",
+      "category": "rooms",
+      "label": "Room view",
+      "altId": "Interior kamar KOOKA Residence Surabaya",
+      "altEn": "Room interior at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890692986.jpg?k=a79ced7af8a36871877e8666ce9dce39244a3d98c8793175a028c2f116ba1b14&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/room-generic-02.jpg"
+    },
+    {
+      "id": "room-generic-03",
+      "category": "rooms",
+      "label": "Room view",
+      "altId": "Interior kamar KOOKA Residence Surabaya",
+      "altEn": "Room interior at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890688656.jpg?k=fd9043843aaca1653453189b2931f0d55b98688132c75ec4f1906906f2a072d0&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/room-generic-03.jpg"
+    },
+    {
+      "id": "room-mezzanine-guestroom",
+      "category": "rooms",
+      "label": "Mezzanine - 3 Adults - Guestroom",
+      "altId": "Kamar Mezzanine untuk tiga tamu di KOOKA",
+      "altEn": "KOOKA Mezzanine guestroom for three adults",
+      "roomTypeCode": "MEZZANINE-3-ADULTS",
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/1432930036/bd4734052f9a32077cb863a7409ef3a3.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/room-mezzanine-guestroom.jpg"
+    },
+    {
+      "id": "room-two-bedroom-villa-interior",
+      "category": "rooms",
+      "label": "2 Bedroom Villa - Interior view",
+      "altId": "Interior Vila 2 Kamar Tidur KOOKA",
+      "altEn": "Interior of the KOOKA 2 Bedroom Villa",
+      "roomTypeCode": "TWO-BEDROOM-VILLA",
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/1432931530/e5e7dc40e0213938faa33416dd4dd481.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/room-two-bedroom-villa-interior.jpg"
+    },
+    {
+      "id": "room-mezzanine-bed",
+      "category": "rooms",
+      "label": "Mezzanine - 3 Adults - Bed",
+      "altId": "Tempat tidur Kamar Mezzanine KOOKA",
+      "altEn": "Bed in the KOOKA Mezzanine room",
+      "roomTypeCode": "MEZZANINE-3-ADULTS",
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/1432930036/2a9837b5e10ce8ddfa653878f11dd3be.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/room-mezzanine-bed.jpg"
+    },
+    {
+      "id": "property-entrance",
+      "category": "property",
+      "label": "Entrance",
+      "altId": "Pintu masuk KOOKA Residence Surabaya",
+      "altEn": "Entrance to KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/15604043cd4a536966a35ac495309556.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/property-entrance.jpg"
+    },
+    {
+      "id": "property-exterior-01",
+      "category": "property",
+      "label": "Exterior view",
+      "altId": "Tampak luar KOOKA Residence Surabaya",
+      "altEn": "Exterior of KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890671082.jpg?k=8067e05a9f808cb46c43caa03d87bb7a67de8e7cd73570d51504a97f2dbf56bc&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/property-exterior-01.jpg"
+    },
+    {
+      "id": "property-exterior-02",
+      "category": "property",
+      "label": "Exterior view",
+      "altId": "Area luar KOOKA Residence Surabaya",
+      "altEn": "Outdoor area at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890671069.jpg?k=6a2c47db5d49719fb4dcaf4638d690d12ffe0f051317a367dd32808270eb6ade&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/property-exterior-02.jpg"
+    },
+    {
+      "id": "property-exterior-03",
+      "category": "property",
+      "label": "Exterior view",
+      "altId": "Area hijau KOOKA Residence Surabaya",
+      "altEn": "Green outdoor area at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890671063.jpg?k=b93563c71a5cc99e998b75e386d3ffdc27d2de6ac387e8046ceab2db9ced5732&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/property-exterior-03.jpg"
+    },
+    {
+      "id": "property-exterior-04",
+      "category": "property",
+      "label": "Exterior view",
+      "altId": "Suasana luar KOOKA Residence Surabaya",
+      "altEn": "Exterior atmosphere at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890671081.jpg?k=d527950efad2fa0f48878946ee646fe4c85e2150f816cb56e1c6634a7d6caada&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/property-exterior-04.jpg"
+    },
+    {
+      "id": "property-exterior-05",
+      "category": "property",
+      "label": "Exterior view",
+      "altId": "Taman luar KOOKA Residence Surabaya",
+      "altEn": "Outdoor garden at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890671073.jpg?k=e4ca03617c6105b8063cdcf8c117d1ab671eeff8a25a9c34948bc1447917dd66&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/property-exterior-05.jpg"
+    },
+    {
+      "id": "property-exterior-06",
+      "category": "property",
+      "label": "Exterior view",
+      "altId": "Fasad KOOKA Residence Surabaya",
+      "altEn": "Facade of KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/1527e3f28f220968b35160aff2b4f106.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/property-exterior-06.jpg"
+    },
+    {
+      "id": "facility-bedroom-01",
+      "category": "facilities",
+      "label": "Bedroom",
+      "altId": "Kamar tidur KOOKA Residence Surabaya",
+      "altEn": "Bedroom at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/71d5ccdb9c8e97cb0fea2be8b4795282.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-bedroom-01.jpg"
+    },
+    {
+      "id": "facility-balcony-01",
+      "category": "facilities",
+      "label": "Balcony/terrace",
+      "altId": "Balkon dan teras KOOKA Residence Surabaya",
+      "altEn": "Balcony and terrace at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/e292dc88a5e541a17921f818429f0812.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-balcony-01.jpg"
+    },
+    {
+      "id": "facility-balcony-02",
+      "category": "facilities",
+      "label": "Balcony/terrace",
+      "altId": "Sudut teras KOOKA Residence Surabaya",
+      "altEn": "Terrace corner at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/8780575ab5e2ff7aa660e6696b15eb60.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-balcony-02.jpg"
+    },
+    {
+      "id": "facility-balcony-03",
+      "category": "facilities",
+      "label": "Balcony/terrace",
+      "altId": "Area teras KOOKA Residence Surabaya",
+      "altEn": "Terrace area at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/431f7e02c002432aca9a93e9fd14f09e.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-balcony-03.jpg"
+    },
+    {
+      "id": "facility-balcony-04",
+      "category": "facilities",
+      "label": "Balcony/terrace",
+      "altId": "Ruang santai di teras KOOKA",
+      "altEn": "Terrace lounge at KOOKA",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/c2fd2b845f1294870f476a26e601c07e.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-balcony-04.jpg"
+    },
+    {
+      "id": "facility-garden",
+      "category": "facilities",
+      "label": "Garden",
+      "altId": "Taman hijau KOOKA Residence Surabaya",
+      "altEn": "Green garden at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890671108.jpg?k=8bebdb5bbad8faa9044ce15128369b62df923ca68b48f6742d925a0b5980f020&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-garden.jpg"
+    },
+    {
+      "id": "facility-guest-room-amenity",
+      "category": "facilities",
+      "label": "Amenity (Guest room)",
+      "altId": "Fasilitas kamar tamu KOOKA",
+      "altEn": "Guestroom amenity at KOOKA",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/70eb4f6374745429ad16e0b99d44b4f9.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-guest-room-amenity.jpg"
+    },
+    {
+      "id": "facility-bedroom-02",
+      "category": "facilities",
+      "label": "Bedroom",
+      "altId": "Kamar tidur nyaman di KOOKA",
+      "altEn": "Comfortable bedroom at KOOKA",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/746297d874a8d83fe57a92d4f6096aa8.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-bedroom-02.jpg"
+    },
+    {
+      "id": "facility-bedroom-03",
+      "category": "facilities",
+      "label": "Bedroom",
+      "altId": "Interior kamar tidur KOOKA",
+      "altEn": "KOOKA bedroom interior",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/1e81804a61553c6093c24c7b6bb7824e.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-bedroom-03.jpg"
+    },
+    {
+      "id": "facility-shower",
+      "category": "facilities",
+      "label": "Shower",
+      "altId": "Area shower KOOKA Residence Surabaya",
+      "altEn": "Shower area at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://q-xx.bstatic.com/xdata/images/hotel/max1024x768/890696277.jpg?k=891340c96b0b6632933168fc95ffe73d53b5f976ee64018bf4f2c65890279019&o=&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-shower.jpg"
+    },
+    {
+      "id": "facility-bathroom",
+      "category": "facilities",
+      "label": "Bathroom",
+      "altId": "Kamar mandi KOOKA Residence Surabaya",
+      "altEn": "Bathroom at KOOKA Residence Surabaya",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/5d719d2654bdb072f4c83f1fee4335ce.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-bathroom.jpg"
+    },
+    {
+      "id": "facility-bedroom-04",
+      "category": "facilities",
+      "label": "Bedroom",
+      "altId": "Suasana kamar tidur KOOKA",
+      "altEn": "Bedroom atmosphere at KOOKA",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/77ed84e263baa6cab98d3b63e9f7ef69.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/facility-bedroom-04.jpg"
+    },
+    {
+      "id": "dining-food-beverages",
+      "category": "dining",
+      "label": "Food and beverages",
+      "altId": "Pilihan makanan dan minuman KOOKA",
+      "altEn": "Food and beverage selection at KOOKA",
+      "roomTypeCode": null,
+      "sourceUrl": "https://pix8.agoda.net/hotelImages/90760258/0/ad4df778d9b591db940d4b9001deece6.jpg?ce=3&s=1024x",
+      "localPath": "/images/agoda-kooka/dining-food-beverages.jpg"
+    }
+  ]
+}

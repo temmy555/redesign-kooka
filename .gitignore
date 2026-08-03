@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Next.js output
+.next/
+.next-uat/
+out/
+dist/
+build/
+
+# Local runtime data
+.data/
+uploads/
+coverage/
+playwright-report/
+test-results/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.infrastructure.example
+
+# Logs and editor files
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Generated TypeScript cache
+*.tsbuildinfo
+
+# Local/generated project artifacts
+graphify-out/
+outputs/
+work/
+
+# Empty nested clone accidentally created during repository setup
+redesign-kooka/
