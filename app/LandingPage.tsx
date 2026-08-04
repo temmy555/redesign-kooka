@@ -22,7 +22,8 @@ import {
   PublicSelect,
 } from "./PublicFormControls";
 import KookaLogo from "./KookaLogo";
-import kookaFoodImage from "../outputs/landing-page-mockup/public/images/kooka-food.jpg";
+
+const kookaFoodImage = "/images/agoda-kooka/dining-food-beverages.jpg";
 
 const roomImageFallbacks = [
   "/images/agoda-kooka/room-mezzanine-guestroom.jpg",
