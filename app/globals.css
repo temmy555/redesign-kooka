@@ -1376,6 +1376,36 @@ footer > div strong {
   display: none;
 }
 
+.whatsapp-float {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #25d366;
+  box-shadow: 0 14px 30px rgba(8, 35, 29, 0.32);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.whatsapp-float svg {
+  width: 30px;
+  height: 30px;
+  fill: white;
+}
+
+.whatsapp-float:hover,
+.whatsapp-float:focus-visible {
+  transform: scale(1.06);
+  box-shadow: 0 16px 34px rgba(8, 35, 29, 0.4);
+}
+
 @media (max-width: 1080px) {
   .site-header {
     grid-template-columns: 1fr auto;
@@ -1706,6 +1736,18 @@ footer > div strong {
 
   footer > div:last-of-type {
     grid-column: 1 / -1;
+  }
+
+  .whatsapp-float {
+    right: 14px;
+    bottom: 86px;
+    width: 50px;
+    height: 50px;
+  }
+
+  .whatsapp-float svg {
+    width: 26px;
+    height: 26px;
   }
 
   .mobile-booking {

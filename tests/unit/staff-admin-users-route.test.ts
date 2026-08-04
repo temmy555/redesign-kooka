@@ -169,9 +169,7 @@ describe("POST /api/staff/admin/users", () => {
 
   it("rejects creating staff when user is already configured as staff", async () => {
     select
-      .mockReturnValueOnce(
-        chain([{ id: "staff-user-id", status: "ACTIVE" }]),
-      )
+      .mockReturnValueOnce(chain([{ id: "staff-user-id", status: "ACTIVE" }]))
       .mockReturnValueOnce(
         chain([{ id: "existing-profile-id", propertyId: "property-1" }]),
       );

@@ -6,6 +6,8 @@ import {
   createMenuCategory,
   createMenuItemVersion,
   getMenuAdminOverview,
+  setMenuCategorySortOrder,
+  setMenuItemSortOrder,
   setMenuItemAvailability,
 } from "../../../../../src/modules/commerce/menu-admin-service";
 import { AuthorizationError } from "../../../../../src/platform/authorization";
@@ -37,6 +39,18 @@ const schema = z.discriminatedUnion("action", [
     taxProfileVersionId: z.string().uuid().optional(),
     effectiveFrom: z.coerce.date(),
     effectiveTo: z.coerce.date().optional(),
+    reason,
+  }),
+  z.object({
+    action: z.literal("SET_CATEGORY_SORT_ORDER"),
+    categoryId: z.string().uuid(),
+    sortOrder: z.number().int().min(0).max(10_000),
+    reason,
+  }),
+  z.object({
+    action: z.literal("SET_ITEM_SORT_ORDER"),
+    itemId: z.string().uuid(),
+    sortOrder: z.number().int().min(0).max(10_000),
     reason,
   }),
   z.object({
@@ -148,6 +162,24 @@ export async function POST(request: Request) {
             menuItemId: body.menuItemId,
             available: body.available,
             reason: body.reason,
+          }),
+        );
+      case "SET_CATEGORY_SORT_ORDER":
+        return NextResponse.json(
+          await setMenuCategorySortOrder({
+            ...requestContext,
+            idempotencyKey,
+            categoryId: body.categoryId,
+            sortOrder: body.sortOrder,
+          }),
+        );
+      case "SET_ITEM_SORT_ORDER":
+        return NextResponse.json(
+          await setMenuItemSortOrder({
+            ...requestContext,
+            idempotencyKey,
+            itemId: body.itemId,
+            sortOrder: body.sortOrder,
           }),
         );
     }

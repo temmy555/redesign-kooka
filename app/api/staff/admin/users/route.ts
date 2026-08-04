@@ -51,10 +51,7 @@ function failure(error: unknown) {
   if (error instanceof z.ZodError)
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   if (error instanceof AuthorizationError)
-    return NextResponse.json(
-      { error: "forbidden" },
-      { status: 403 },
-    );
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   if (
     error instanceof AppError &&
     ["VALIDATION_ERROR", "CONFLICT", "INTERNAL_ERROR"].includes(error.code)
@@ -123,7 +120,10 @@ export async function POST(request: Request) {
 
     const result = await db.transaction(async (tx) => {
       const [existingProfile] = await tx
-        .select({ id: employeeProfiles.id, propertyId: employeeProfiles.propertyId })
+        .select({
+          id: employeeProfiles.id,
+          propertyId: employeeProfiles.propertyId,
+        })
         .from(employeeProfiles)
         .where(eq(employeeProfiles.userId, userId))
         .limit(1);
@@ -158,7 +158,8 @@ export async function POST(request: Request) {
           .from(roles)
           .where(and(eq(roles.code, body.roleCode), eq(roles.status, "ACTIVE")))
           .limit(1);
-        if (!roleRow) throw new AppError("VALIDATION_ERROR", "Role tidak valid");
+        if (!roleRow)
+          throw new AppError("VALIDATION_ERROR", "Role tidak valid");
         const [activeRole] = await tx
           .select({ roleId: userRoles.roleId })
           .from(userRoles)

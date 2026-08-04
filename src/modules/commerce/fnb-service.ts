@@ -153,6 +153,7 @@ export async function getPublicMenu(params: {
       categorySortOrder: menuCategories.sortOrder,
       itemId: menuItems.id,
       itemCode: menuItems.code,
+      itemSortOrder: menuItems.sortOrder,
       available: menuItems.currentlyAvailable,
       versionId: menuItemVersions.id,
       versionNumber: menuItemVersions.versionNumber,
@@ -192,6 +193,7 @@ export async function getPublicMenu(params: {
     .orderBy(
       asc(menuCategories.sortOrder),
       asc(menuCategories.code),
+      asc(menuItems.sortOrder),
       asc(menuItems.code),
       desc(menuItemVersions.effectiveFrom),
     );

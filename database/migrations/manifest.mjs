@@ -124,4 +124,10 @@ export const migrations = Object.freeze([
     description:
       "Release historical physical-room assignments and night claims left by cancelled or expired reservations",
   }),
+  Object.freeze({
+    id: "0021_menu_content_sort_order",
+    path: "database/migrations/after-drizzle/0021_menu_content_sort_order.sql",
+    description:
+      "Add configurable sort_order fields for menu categories and menu items",
+  }),
 ]);

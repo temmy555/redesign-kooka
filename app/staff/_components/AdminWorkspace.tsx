@@ -180,26 +180,52 @@ export default function AdminWorkspace({
       const settled = await Promise.allSettled(
         endpoints.map(async ([name, endpoint]) => {
           const response = await fetch(endpoint, { cache: "no-store" });
-          if (!response.ok) throw new Error(`${endpoint} -> ${response.status}`);
-          return [name, await response.json()] as const;
+          if (response.ok) {
+            return { name, response: await response.json() } as const;
+          }
+          let details = "";
+          try {
+            const payload = await response.json();
+            const message =
+              typeof payload?.error === "object" && payload.error
+                ? String(payload.error.message ?? payload.error.code ?? "")
+                : "";
+            details = message ? ` (${message})` : "";
+          } catch {
+            try {
+              details = ` (${await response.text()})`;
+            } catch {
+              details = "";
+            }
+          }
+          return {
+            name,
+            response: null,
+            error: `${endpoint} -> ${response.status}${details}`,
+          };
         }),
       );
       const partial: Record<string, unknown> = {};
-      let failedCount = 0;
+      const failed: string[] = [];
       for (const item of settled) {
-        if (item.status === "fulfilled") {
-          const [name, responseData] = item.value;
-          partial[name] = responseData;
+        if (item.status === "fulfilled" && item.value.response !== null) {
+          partial[item.value.name] = item.value.response;
           continue;
         }
-        failedCount += 1;
-        console.error("Failed to load admin endpoint", item.reason);
+        const errorMessage =
+          item.status === "fulfilled"
+            ? item.value.error
+            : item.reason instanceof Error
+              ? item.reason.message
+              : String(item.reason);
+        failed.push(String(errorMessage ?? "Unknown admin endpoint error"));
       }
       setData(partial);
-      if (failedCount > 0) {
+      if (failed.length > 0) {
+        console.error("Failed to load admin endpoints:", failed);
         setNotice({
           tone: "error",
-          message: "Sebagian data administrasi gagal dimuat, tetapi bagian lain tetap ditampilkan.",
+          message: `Sebagian data administrasi gagal dimuat: ${failed.join("; ")}.`,
         });
       } else {
         setNotice(null);
@@ -1075,7 +1101,7 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
           </button>
         </form>
       </section>
-      <section className={`${styles.panel} ${styles.actionGridWide}`}>
+      <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
         <div className={styles.panelHeader}>
           <h2>Daftar jenis kamar</h2>
           <span className={styles.countPill}>
@@ -1358,7 +1384,7 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
           <button className={styles.primaryButton}>Tambah amenity</button>
         </form>
       </section>
-      <section className={`${styles.panel} ${styles.actionGridWide}`}>
+      <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
         <div className={styles.panelHeader}>
           <h2>Master kamar</h2>
           <span className={styles.countPill}>
@@ -2288,7 +2314,7 @@ function CommercialAdmin({
           <button className={styles.primaryButton}>Simpan kurs tampilan</button>
         </form>
       </section>
-      <section className={`${styles.panel} ${styles.actionGridWide}`}>
+      <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
         <div className={styles.panelHeader}>
           <h2>Pengaturan yang aktif</h2>
           <span className={styles.countPill}>
@@ -2297,7 +2323,7 @@ function CommercialAdmin({
             kebijakan · {latestExchange.length} kurs
           </span>
         </div>
-        <div className={styles.commercialGroups}>
+        <div className={styles.menuCatalogGroups}>
           <section className={styles.commercialGroup}>
             <div className={styles.commercialGroupHeader}>
               <h3>Pajak &amp; biaya layanan</h3>
@@ -2629,6 +2655,7 @@ function ContentAdmin({
         categoryNameId: string;
         categoryNameEn: string;
         categoryStatus: string;
+        categorySortOrder: number;
         items: Map<
           string,
           {
@@ -2636,6 +2663,7 @@ function ContentAdmin({
             itemCode: string;
             itemStatus: string;
             currentlyAvailable: boolean;
+            itemSortOrder: number;
             versions: JsonRecord[];
             latestVersion?: JsonRecord;
             activatableVersionId?: string;
@@ -2655,6 +2683,7 @@ function ContentAdmin({
           categoryNameId: String(row.categoryNameId ?? ""),
           categoryNameEn: String(row.categoryNameEn ?? ""),
           categoryStatus: String(row.categoryStatus ?? "DRAFT"),
+          categorySortOrder: Number(row.categorySortOrder ?? 0),
           items: new Map(),
         };
         categories.set(categoryId, category);
@@ -2669,6 +2698,7 @@ function ContentAdmin({
           itemCode: String(row.itemCode ?? ""),
           itemStatus: String(row.itemStatus ?? "DRAFT"),
           currentlyAvailable: Boolean(row.currentlyAvailable),
+          itemSortOrder: Number(row.itemSortOrder ?? 0),
           versions: [],
         };
         category.items.set(itemId, item);
@@ -2694,24 +2724,31 @@ function ContentAdmin({
           ...item,
           versions,
           latestVersion,
-          activatableVersionId: String(
-            activatableVersion?.versionId ?? "",
-          ),
+          activatableVersionId: String(activatableVersion?.versionId ?? ""),
         });
       }
       result.push({
         ...category,
-        items: items.sort((first, second) =>
-          String(first.itemCode).localeCompare(String(second.itemCode), "id-ID"),
+        items: items.sort(
+          (first, second) =>
+            Number(first.itemSortOrder ?? 0) -
+              Number(second.itemSortOrder ?? 0) ||
+            String(first.itemCode).localeCompare(
+              String(second.itemCode),
+              "id-ID",
+            ),
         ),
       });
     }
 
-    return result.sort((first, second) =>
-      String(first.categoryNameId).localeCompare(
-        String(second.categoryNameId),
-        "id-ID",
-      ),
+    return result.sort(
+      (first, second) =>
+        Number(first.categorySortOrder ?? 0) -
+          Number(second.categorySortOrder ?? 0) ||
+        String(first.categoryNameId).localeCompare(
+          String(second.categoryNameId),
+          "id-ID",
+        ),
     );
   }, [menuRows]);
   const menuCategoryOptions = menuCatalog.map((category) => ({
@@ -2727,6 +2764,12 @@ function ContentAdmin({
   const [nameId, setNameId] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
+  const [categorySortDrafts, setCategorySortDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [itemSortDrafts, setItemSortDrafts] = useState<Record<string, string>>(
+    {},
+  );
   const [newItemCategoryId, setNewItemCategoryId] = useState("");
   const [newItemNameId, setNewItemNameId] = useState("");
   const [newItemNameEn, setNewItemNameEn] = useState("");
@@ -2746,8 +2789,9 @@ function ContentAdmin({
     newItemCategoryId || menuCategoryOptions[0]?.value || "";
   const autoGeneratedMenuItemCode = useMemo(() => {
     const selectedCategory =
-      menuCatalog.find((category) => category.categoryId === selectedMenuCategoryId) ??
-      menuCatalog[0];
+      menuCatalog.find(
+        (category) => category.categoryId === selectedMenuCategoryId,
+      ) ?? menuCatalog[0];
     const categoryCode = String(
       selectedCategory?.categoryCode ||
         selectedCategory?.categoryNameId ||
@@ -2828,7 +2872,8 @@ function ContentAdmin({
     if (!resolvedItemCode.trim()) {
       setNotice({
         tone: "error",
-        message: "Kode item tidak dapat dibuat, silakan isi nama item terlebih dahulu.",
+        message:
+          "Kode item tidak dapat dibuat, silakan isi nama item terlebih dahulu.",
       });
       return;
     }
@@ -2869,7 +2914,9 @@ function ContentAdmin({
       setNotice({
         tone: "error",
         message:
-          error instanceof Error ? error.message : "Item menu tidak dapat dibuat.",
+          error instanceof Error
+            ? error.message
+            : "Item menu tidak dapat dibuat.",
       });
     }
   }
@@ -2895,7 +2942,10 @@ function ContentAdmin({
       });
     }
   }
-  async function toggleMenuItemAvailability(itemId: string, available: boolean) {
+  async function toggleMenuItemAvailability(
+    itemId: string,
+    available: boolean,
+  ) {
     try {
       await post("/api/staff/admin/menu", {
         action: "SET_AVAILABILITY",
@@ -2952,6 +3002,85 @@ function ContentAdmin({
       });
     }
   }
+  async function updateCategorySortOrder(
+    categoryId: string,
+    defaultValue: number,
+  ) {
+    if (!canManageMenu) return;
+    const order = Number(
+      categorySortDrafts[categoryId] ?? String(defaultValue ?? 0),
+    );
+    if (!Number.isInteger(order) || order < 0) {
+      setNotice({
+        tone: "error",
+        message: "Urutan kategori harus angka bulat 0 atau lebih.",
+      });
+      return;
+    }
+    try {
+      await post("/api/staff/admin/menu", {
+        action: "SET_CATEGORY_SORT_ORDER",
+        categoryId,
+        sortOrder: order,
+        reason: "Atur urutan kategori menu",
+      });
+      setNotice({
+        tone: "success",
+        message: "Urutan kategori berhasil disimpan.",
+      });
+      setCategorySortDrafts((current) => {
+        const update = { ...current };
+        delete update[categoryId];
+        return update;
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Gagal menyimpan urutan kategori.",
+      });
+    }
+  }
+  async function updateItemSortOrder(itemId: string, defaultValue: number) {
+    if (!canManageMenu) return;
+    const order = Number(itemSortDrafts[itemId] ?? String(defaultValue ?? 0));
+    if (!Number.isInteger(order) || order < 0) {
+      setNotice({
+        tone: "error",
+        message: "Urutan item harus angka bulat 0 atau lebih.",
+      });
+      return;
+    }
+    try {
+      await post("/api/staff/admin/menu", {
+        action: "SET_ITEM_SORT_ORDER",
+        itemId,
+        sortOrder: order,
+        reason: "Atur urutan item menu",
+      });
+      setNotice({
+        tone: "success",
+        message: "Urutan item menu berhasil disimpan.",
+      });
+      setItemSortDrafts((current) => {
+        const update = { ...current };
+        delete update[itemId];
+        return update;
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Gagal menyimpan urutan item menu.",
+      });
+    }
+  }
   async function lifecycle() {
     if (!lifecycleRequest || lifecycleReason.trim().length < 3) return;
     try {
@@ -2974,375 +3103,452 @@ function ContentAdmin({
     }
   }
   return (
-    <div className={styles.actionGrid}>
-      <section className={styles.formCard}>
-        <div className={styles.panelHeader}>
-          <h2>Upload foto asli</h2>
-          {!canManageMedia ? (
-            <span className={styles.countPill}>Read only</span>
-          ) : null}
+    <div className={styles.contentAdminLayout}>
+      <div className={styles.contentAdminPrimaryGrid}>
+        <div className={styles.contentAdminColumn}>
+          <section className={styles.formCard}>
+            <div className={styles.panelHeader}>
+              <h2>Upload foto asli</h2>
+              {!canManageMedia ? (
+                <span className={styles.countPill}>Read only</span>
+              ) : null}
+            </div>
+            {!canManageMedia ? (
+              <p className={styles.formHint}>
+                Upload media memerlukan izin pengelola konten.
+              </p>
+            ) : null}
+            <form className={styles.staffForm} onSubmit={upload}>
+              <FileField
+                accept="image/jpeg,image/png"
+                file={file}
+                helper="JPEG atau PNG · gunakan foto asli properti"
+                label="Foto JPEG / PNG"
+                onChange={setFile}
+              />
+              <label>
+                Judul
+                <input
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                />
+              </label>
+              <div className={styles.formGrid}>
+                <label>
+                  Alt text Indonesia
+                  <input
+                    required
+                    value={altId}
+                    onChange={(event) => setAltId(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Alt text English
+                  <input
+                    required
+                    value={altEn}
+                    onChange={(event) => setAltEn(event.target.value)}
+                  />
+                </label>
+              </div>
+              <label>
+                Sumber / hak penggunaan
+                <input
+                  required
+                  value={rights}
+                  onChange={(event) => setRights(event.target.value)}
+                />
+              </label>
+              <button
+                className={styles.primaryButton}
+                disabled={!canManageMedia}
+                type="submit"
+              >
+                Upload ke galeri
+              </button>
+            </form>
+          </section>
+          <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
+            <div className={styles.panelHeader}>
+              <h2>Galeri tersimpan</h2>
+              <span className={styles.countPill}>{assets.length} media</span>
+            </div>
+            {!canManageMedia ? (
+              <p className={styles.emptyCompact}>
+                Akses katalog media tidak aktif di role ini. Mintalah hak{" "}
+                <strong>cms.media.manage</strong> untuk melihat data media.
+              </p>
+            ) : null}
+            {assets.length ? (
+              <div className={styles.masterList}>
+                {assets.map((asset) => (
+                  <article key={`${String(asset.id)}`}>
+                    <div>
+                      <strong>
+                        {String(asset.title || "Foto tanpa judul")}
+                      </strong>
+                      <small>
+                        {String(asset.mediaType || "MEDIA")} · status:{" "}
+                        {String(asset.status || "DRAFT")} · scan:{" "}
+                        {String(asset.scanStatus || "UNKNOWN")}
+                      </small>
+                      <small>
+                        {Boolean(asset.authenticPropertyMedia)
+                          ? "Foto asli properti"
+                          : "Foto non-properti"}
+                      </small>
+                    </div>
+                    <span className={styles.statusPill}>
+                      {String(asset.mimeType || "N/A")}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className={styles.emptyCompact}>
+                Belum ada foto di galeri. Upload foto melalui formulir di atas.
+              </p>
+            )}
+          </section>
         </div>
-        {!canManageMedia ? (
-          <p className={styles.formHint}>
-            Upload media memerlukan izin pengelola konten.
-          </p>
-        ) : null}
-        <form className={styles.staffForm} onSubmit={upload}>
-          <FileField
-            accept="image/jpeg,image/png"
-            file={file}
-            helper="JPEG atau PNG · gunakan foto asli properti"
-            label="Foto JPEG / PNG"
-            onChange={setFile}
-          />
-          <label>
-            Judul
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </label>
-          <div className={styles.formGrid}>
-            <label>
-              Alt text Indonesia
-              <input
-                required
-                value={altId}
-                onChange={(event) => setAltId(event.target.value)}
-              />
-            </label>
-            <label>
-              Alt text English
-              <input
-                required
-                value={altEn}
-                onChange={(event) => setAltEn(event.target.value)}
-              />
-            </label>
-          </div>
-          <label>
-            Sumber / hak penggunaan
-            <input
-              required
-              value={rights}
-              onChange={(event) => setRights(event.target.value)}
-            />
-          </label>
-          <button
-            className={styles.primaryButton}
-            disabled={!canManageMedia}
-            type="submit"
-          >
-            Upload ke galeri
-          </button>
-        </form>
-      </section>
-      <section className={styles.formCard}>
-        <div className={styles.panelHeader}>
-          <h2>Kategori menu</h2>
-          {!canManageMenu ? (
-            <span className={styles.countPill}>Read only</span>
-          ) : null}
+        <div className={styles.contentAdminColumn}>
+          <section className={styles.formCard}>
+            <div className={styles.panelHeader}>
+              <h2>Kategori menu</h2>
+              {!canManageMenu ? (
+                <span className={styles.countPill}>Read only</span>
+              ) : null}
+            </div>
+            {!canManageMenu ? (
+              <p className={styles.formHint}>
+                Menambah kategori menu memerlukan role komersial manajemen.
+              </p>
+            ) : null}
+            <form className={styles.staffForm} onSubmit={createCategory}>
+              <div className={styles.formGrid}>
+                <label>
+                  Kode
+                  <input
+                    required
+                    value={categoryCode}
+                    onChange={(event) =>
+                      setCategoryCode(event.target.value.toUpperCase())
+                    }
+                  />
+                </label>
+                <label>
+                  Urutan
+                  <input
+                    min="0"
+                    type="number"
+                    value={sortOrder}
+                    onChange={(event) => setSortOrder(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Nama Indonesia
+                  <input
+                    required
+                    value={nameId}
+                    onChange={(event) => setNameId(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Nama English
+                  <input
+                    required
+                    value={nameEn}
+                    onChange={(event) => setNameEn(event.target.value)}
+                  />
+                </label>
+              </div>
+              <button
+                className={styles.primaryButton}
+                disabled={!canManageMenu}
+                type="submit"
+              >
+                Tambah kategori
+              </button>
+            </form>
+          </section>
+          <section className={styles.formCard}>
+            <div className={styles.panelHeader}>
+              <h2>Tambah menu F&B</h2>
+              <span className={styles.countPill}>
+                {menuCategoryOptions.length} kategori
+              </span>
+            </div>
+            {!canManageMenu ? (
+              <p className={styles.formHint}>
+                Menambah item menu memerlukan role komersial manajemen.
+              </p>
+            ) : null}
+            <form className={styles.staffForm} onSubmit={createMenuItem}>
+              <label>
+                Kategori
+                <KookaSelect
+                  ariaLabel="Kategori menu"
+                  disabled={!canManageMenu}
+                  emptyMessage="Belum ada kategori menu"
+                  onChange={setNewItemCategoryId}
+                  options={menuCategoryOptions}
+                  value={selectedMenuCategoryId}
+                />
+              </label>
+              <div className={styles.formGrid}>
+                <label>
+                  Kode item
+                  <input
+                    readOnly
+                    value={autoGeneratedMenuItemCode}
+                    title="Kode item dibuat otomatis."
+                  />
+                </label>
+                <label>
+                  Nama Indonesia
+                  <input
+                    required
+                    value={newItemNameId}
+                    onChange={(event) => setNewItemNameId(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Nama English
+                  <input
+                    required
+                    value={newItemNameEn}
+                    onChange={(event) => setNewItemNameEn(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Harga (IDR)
+                  <MoneyInput
+                    ariaLabel="Harga menu"
+                    onChange={setNewItemPrice}
+                    required
+                    value={newItemPrice}
+                  />
+                </label>
+              </div>
+              <label>
+                Deskripsi Indonesia
+                <textarea
+                  rows={2}
+                  value={newItemDescriptionId}
+                  onChange={(event) =>
+                    setNewItemDescriptionId(event.target.value)
+                  }
+                />
+              </label>
+              <label>
+                Deskripsi English
+                <textarea
+                  rows={2}
+                  value={newItemDescriptionEn}
+                  onChange={(event) =>
+                    setNewItemDescriptionEn(event.target.value)
+                  }
+                />
+              </label>
+              <label>
+                ID versi pajak profil (opsional)
+                <input
+                  value={newItemTaxProfileId}
+                  onChange={(event) =>
+                    setNewItemTaxProfileId(event.target.value)
+                  }
+                />
+              </label>
+              <div className={styles.formGrid}>
+                <label>
+                  Berlaku mulai
+                  <DateField
+                    ariaLabel="Berlaku mulai"
+                    onChange={setNewItemEffectiveFrom}
+                    value={newItemEffectiveFrom}
+                  />
+                </label>
+              </div>
+              <label>
+                Alasan
+                <textarea
+                  rows={2}
+                  value={newItemReason}
+                  onChange={(event) => setNewItemReason(event.target.value)}
+                />
+              </label>
+              <button
+                className={styles.primaryButton}
+                disabled={!canManageMenu}
+                type="submit"
+              >
+                Tambah item menu
+              </button>
+            </form>
+          </section>
         </div>
-        {!canManageMenu ? (
-          <p className={styles.formHint}>
-            Menambah kategori menu memerlukan role komersial manajemen.
-          </p>
-        ) : null}
-        <form className={styles.staffForm} onSubmit={createCategory}>
-          <div className={styles.formGrid}>
-            <label>
-              Kode
-              <input
-                required
-                value={categoryCode}
-                onChange={(event) =>
-                  setCategoryCode(event.target.value.toUpperCase())
-                }
-              />
-            </label>
-            <label>
-              Urutan
-              <input
-                min="0"
-                type="number"
-                value={sortOrder}
-                onChange={(event) => setSortOrder(event.target.value)}
-              />
-            </label>
-            <label>
-              Nama Indonesia
-              <input
-                required
-                value={nameId}
-                onChange={(event) => setNameId(event.target.value)}
-              />
-            </label>
-            <label>
-              Nama English
-              <input
-                required
-                value={nameEn}
-                onChange={(event) => setNameEn(event.target.value)}
-              />
-            </label>
-          </div>
-          <button
-            className={styles.primaryButton}
-            disabled={!canManageMenu}
-            type="submit"
-          >
-            Tambah kategori
-          </button>
-        </form>
-      </section>
-      <section className={styles.formCard}>
-        <div className={styles.panelHeader}>
-          <h2>Tambah menu F&B</h2>
-          <span className={styles.countPill}>
-            {menuCategoryOptions.length} kategori
-          </span>
-        </div>
-        {!canManageMenu ? (
-          <p className={styles.formHint}>
-            Menambah item menu memerlukan role komersial manajemen.
-          </p>
-        ) : null}
-        <form className={styles.staffForm} onSubmit={createMenuItem}>
-          <label>
-            Kategori
-            <KookaSelect
-              ariaLabel="Kategori menu"
-              disabled={!canManageMenu}
-              emptyMessage="Belum ada kategori menu"
-              onChange={setNewItemCategoryId}
-              options={menuCategoryOptions}
-              value={selectedMenuCategoryId}
-            />
-          </label>
-          <div className={styles.formGrid}>
-            <label>
-              Kode item
-              <input
-                readOnly
-                value={autoGeneratedMenuItemCode}
-                title="Kode item dibuat otomatis."
-              />
-            </label>
-            <label>
-              Nama Indonesia
-              <input
-                required
-                value={newItemNameId}
-                onChange={(event) => setNewItemNameId(event.target.value)}
-              />
-            </label>
-            <label>
-              Nama English
-              <input
-                required
-                value={newItemNameEn}
-                onChange={(event) => setNewItemNameEn(event.target.value)}
-              />
-            </label>
-            <label>
-              Harga (IDR)
-              <MoneyInput
-                ariaLabel="Harga menu"
-                onChange={setNewItemPrice}
-                required
-                value={newItemPrice}
-              />
-            </label>
-          </div>
-          <label>
-            Deskripsi Indonesia
-            <textarea
-              rows={2}
-              value={newItemDescriptionId}
-              onChange={(event) => setNewItemDescriptionId(event.target.value)}
-            />
-          </label>
-          <label>
-            Deskripsi English
-            <textarea
-              rows={2}
-              value={newItemDescriptionEn}
-              onChange={(event) => setNewItemDescriptionEn(event.target.value)}
-            />
-          </label>
-          <label>
-            ID versi pajak profil (opsional)
-            <input
-              value={newItemTaxProfileId}
-              onChange={(event) => setNewItemTaxProfileId(event.target.value)}
-            />
-          </label>
-          <div className={styles.formGrid}>
-            <label>
-              Berlaku mulai
-              <DateField
-                ariaLabel="Berlaku mulai"
-                onChange={setNewItemEffectiveFrom}
-                value={newItemEffectiveFrom}
-              />
-            </label>
-          </div>
-          <label>
-            Alasan
-            <textarea
-              rows={2}
-              value={newItemReason}
-              onChange={(event) => setNewItemReason(event.target.value)}
-            />
-          </label>
-          <button
-            className={styles.primaryButton}
-            disabled={!canManageMenu}
-            type="submit"
-          >
-            Tambah item menu
-          </button>
-        </form>
-      </section>
-      <section className={`${styles.panel} ${styles.actionGridWide}`}>
+      </div>
+      <section
+        className={`${styles.panel} ${styles.menuCatalogPanel} ${styles.contentLandingPanel}`}
+      >
         <div className={styles.panelHeader}>
           <h2>Halaman landing</h2>
           <span className={styles.countPill}>{pages.length} versi</span>
         </div>
-        <div className={styles.masterList}>
-          {pages.map((page) => (
-            <article key={`${String(page.pageId)}-${String(page.versionId)}`}>
-              <div>
-                <strong>{String(page.routeKey)}</strong>
-                <small>Versi {String(page.versionNumber ?? "—")}</small>
-              </div>
-              <span className={styles.statusPill}>
-                {human(String(page.lifecycleStatus ?? page.pageStatus))}
-              </span>
-              <div className={styles.inlineActions}>
-                {page.lifecycleStatus === "DRAFT" ? (
-                  <button
-                    className={styles.textButton}
-                    onClick={() => {
-                      setLifecycleReason("");
-                      setLifecycleRequest({
-                        endpoint: "/api/staff/admin/content",
-                        body: {
-                          action: "SUBMIT_REVIEW",
-                          versionId: page.versionId,
-                        },
-                      });
-                    }}
-                  >
-                    Ajukan review
-                  </button>
-                ) : null}
-                {page.versionId ? (
-                  <button
-                    className={styles.textButton}
-                    onClick={() => {
-                      setLifecycleReason("");
-                      setLifecycleRequest({
-                        endpoint: "/api/staff/admin/content",
-                        body: {
-                          action: "PUBLISH",
-                          versionId: page.versionId,
-                        },
-                      });
-                    }}
-                  >
-                    Publish
-                  </button>
-                ) : null}
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-      <section className={`${styles.panel} ${styles.actionGridWide}`}>
-        <div className={styles.panelHeader}>
-          <h2>Ringkasan media</h2>
-          <span className={styles.countPill}>
-            {assets.length} media · {menuCatalog.reduce(
-              (total, category) => total + category.items.length,
-              0,
-            )}{" "}
-            item menu
-          </span>
-        </div>
-        {!canManageMedia ? (
-          <p className={styles.emptyCompact}>
-            Akses katalog media tidak aktif di role ini. Mintalah hak{' '}
-            <strong>cms.media.manage</strong> untuk melihat data media.
-          </p>
-        ) : null}
-        {assets.length ? (
+        {pages.length ? (
           <div className={styles.masterList}>
-            {assets.map((asset) => (
-              <article key={`${String(asset.id)}`}>
+            {pages.map((page) => (
+              <article key={`${String(page.pageId)}-${String(page.versionId)}`}>
                 <div>
-                  <strong>{String(asset.title || "Foto tanpa judul")}</strong>
-                  <small>
-                    {String(asset.mediaType || "MEDIA")} · status:{" "}
-                    {String(asset.status || "DRAFT")} · scan:{" "}
-                    {String(asset.scanStatus || "UNKNOWN")}
-                  </small>
-                  <small>
-                    {Boolean(asset.authenticPropertyMedia)
-                      ? "Foto asli properti"
-                      : "Foto non-properti"}
-                  </small>
+                  <strong>{String(page.routeKey)}</strong>
+                  <small>Versi {String(page.versionNumber ?? "—")}</small>
                 </div>
                 <span className={styles.statusPill}>
-                  {String(asset.mimeType || "N/A")}
+                  {human(String(page.lifecycleStatus ?? page.pageStatus))}
                 </span>
+                <div className={styles.inlineActions}>
+                  {page.lifecycleStatus === "DRAFT" ? (
+                    <button
+                      className={styles.textButton}
+                      onClick={() => {
+                        setLifecycleReason("");
+                        setLifecycleRequest({
+                          endpoint: "/api/staff/admin/content",
+                          body: {
+                            action: "SUBMIT_REVIEW",
+                            versionId: page.versionId,
+                          },
+                        });
+                      }}
+                    >
+                      Ajukan review
+                    </button>
+                  ) : null}
+                  {page.versionId ? (
+                    <button
+                      className={styles.textButton}
+                      onClick={() => {
+                        setLifecycleReason("");
+                        setLifecycleRequest({
+                          endpoint: "/api/staff/admin/content",
+                          body: {
+                            action: "PUBLISH",
+                            versionId: page.versionId,
+                          },
+                        });
+                      }}
+                    >
+                      Publish
+                    </button>
+                  ) : null}
+                </div>
               </article>
             ))}
           </div>
         ) : (
-          <p className={styles.emptyCompact}>Belum ada media aktif.</p>
+          <p className={styles.emptyCompact}>
+            Belum ada versi halaman landing yang dikelola melalui CMS.
+          </p>
         )}
       </section>
-      <section className={`${styles.panel} ${styles.actionGridWide}`}>
+      <section
+        className={`${styles.panel} ${styles.menuCatalogPanel} ${styles.contentCatalogPanel}`}
+      >
         <div className={styles.panelHeader}>
           <h2>Katalog menu</h2>
           <span className={styles.countPill}>
             {menuCatalog.length} kategori ·{" "}
-            {menuCatalog.reduce((total, category) => total + category.items.length, 0)} item
+            {menuCatalog.reduce(
+              (total, category) => total + category.items.length,
+              0,
+            )}{" "}
+            item
           </span>
         </div>
         {!canManageMenu ? (
           <p className={styles.emptyCompact}>
-            Anda tidak memiliki hak ubah menu (commercial.manage), jadi mode lihat
-            saja.
+            Anda tidak memiliki hak ubah menu (commercial.manage), jadi mode
+            lihat saja.
           </p>
         ) : null}
-        <div className={styles.commercialGroups}>
+        <div className={styles.menuCatalogGroups}>
           {menuCatalog.length ? (
             menuCatalog.map((category) => (
-              <section className={styles.commercialGroup} key={category.categoryId}>
-                <div className={styles.commercialGroupHeader}>
-                  <h3>
-                    {category.categoryNameId || category.categoryNameEn || category.categoryCode}
-                  </h3>
-                  <small>{category.items.length} item</small>
+              <section
+                className={styles.menuCategoryCard}
+                key={category.categoryId}
+              >
+                <div className={styles.menuCategoryHeader}>
+                  <div>
+                    <h3>
+                      {category.categoryNameId ||
+                        category.categoryNameEn ||
+                        category.categoryCode}
+                    </h3>
+                    <small>{category.categoryCode || "-"}</small>
+                  </div>
+                  <div className={styles.menuCategoryMeta}>
+                    <span className={styles.statusPill}>
+                      {String(category.categoryStatus)}
+                    </span>
+                    <span className={styles.countPill}>
+                      {category.items.length} item
+                    </span>
+                    {canManageMenu ? (
+                      <label className={styles.menuOrderControl}>
+                        Urutan:
+                        <input
+                          min="0"
+                          type="number"
+                          value={
+                            categorySortDrafts[category.categoryId] ??
+                            String(category.categorySortOrder ?? 0)
+                          }
+                          onChange={(event) =>
+                            setCategorySortDrafts((current) => ({
+                              ...current,
+                              [category.categoryId]: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    ) : null}
+                    {canManageMenu ? (
+                      <button
+                        className={styles.secondaryButton}
+                        onClick={() =>
+                          void updateCategorySortOrder(
+                            category.categoryId,
+                            category.categorySortOrder,
+                          )
+                        }
+                        type="button"
+                      >
+                        Simpan urutan
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 {category.items.length ? (
-                  <div className={styles.masterList}>
+                  <div className={styles.menuItemList}>
                     {category.items.map((item) => {
                       const latest = item.latestVersion;
                       if (!latest) return null;
                       return (
-                        <article key={item.itemId}>
-                          <div>
+                        <article
+                          key={item.itemId}
+                          className={styles.menuItemRow}
+                        >
+                          <div className={styles.menuItemInfo}>
                             <strong>
                               {String(latest.nameId ?? item.itemCode)}
                             </strong>
                             <small>{String(item.itemCode)}</small>
                             <small>
                               {idr(latest.priceIdr)} · status{" "}
-                              {String(latest.lifecycleStatus ?? item.itemStatus)}
+                              {String(
+                                latest.lifecycleStatus ?? item.itemStatus,
+                              )}
                             </small>
                             <small>
                               Berlaku: {dateLabel(latest.effectiveFrom)} —{" "}
@@ -3351,8 +3557,47 @@ function ContentAdmin({
                                 : "sampai selamanya"}
                             </small>
                           </div>
-                          <div className={styles.commercialActions}>
-                            <span className={styles.statusPill}>
+                          <div className={styles.menuItemActions}>
+                            {canManageMenu ? (
+                              <label className={styles.menuOrderControl}>
+                                Urutan:
+                                <input
+                                  min="0"
+                                  type="number"
+                                  value={
+                                    itemSortDrafts[item.itemId] ??
+                                    String(item.itemSortOrder ?? 0)
+                                  }
+                                  onChange={(event) =>
+                                    setItemSortDrafts((current) => ({
+                                      ...current,
+                                      [item.itemId]: event.target.value,
+                                    }))
+                                  }
+                                />
+                              </label>
+                            ) : null}
+                            {canManageMenu ? (
+                              <button
+                                className={styles.secondaryButton}
+                                onClick={() =>
+                                  void updateItemSortOrder(
+                                    item.itemId,
+                                    item.itemSortOrder,
+                                  )
+                                }
+                                type="button"
+                              >
+                                Simpan urutan
+                              </button>
+                            ) : null}
+                            <span
+                              className={`${styles.menuAvailabilityPill} ${
+                                item.currentlyAvailable
+                                  ? styles.availabilityAvailable
+                                  : styles.availabilityUnavailable
+                              }`}
+                            >
                               {item.currentlyAvailable
                                 ? "Tersedia"
                                 : "Tidak tersedia"}
@@ -3401,7 +3646,9 @@ function ContentAdmin({
               </section>
             ))
           ) : (
-            <p className={styles.emptyCompact}>Belum ada menu yang terdaftar.</p>
+            <p className={styles.emptyCompact}>
+              Belum ada menu yang terdaftar.
+            </p>
           )}
         </div>
       </section>

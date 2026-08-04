@@ -27,11 +27,19 @@ function code(value: string) {
   return normalized;
 }
 
-export async function getMenuAdminOverview(params: {
+function isMenuSortColumnMissing(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = String(error.message || "").toLowerCase();
+  return (
+    /sort_order/.test(message) &&
+    (error as Error & { code?: string }).code === "42703"
+  );
+}
+
+function getMenuAdminOverviewLegacy(params: {
   propertyId: string;
   session: FnbStaffSession;
 }) {
-  await requirePermission(params.session, params.propertyId, "commercial.view");
   return getDatabase()
     .select({
       categoryId: menuCategories.id,
@@ -39,8 +47,10 @@ export async function getMenuAdminOverview(params: {
       categoryNameId: menuCategories.nameId,
       categoryNameEn: menuCategories.nameEn,
       categoryStatus: menuCategories.status,
+      categorySortOrder: sql<number>`0`,
       itemId: menuItems.id,
       itemCode: menuItems.code,
+      itemSortOrder: sql<number>`0`,
       itemStatus: menuItems.status,
       currentlyAvailable: menuItems.currentlyAvailable,
       versionId: menuItemVersions.id,
@@ -57,11 +67,53 @@ export async function getMenuAdminOverview(params: {
     .leftJoin(menuItems, eq(menuItems.categoryId, menuCategories.id))
     .leftJoin(menuItemVersions, eq(menuItemVersions.menuItemId, menuItems.id))
     .where(eq(menuCategories.propertyId, params.propertyId))
-    .orderBy(
-      menuCategories.sortOrder,
-      menuCategories.code,
-      desc(menuItemVersions.versionNumber),
-    );
+    .orderBy(menuCategories.code, desc(menuItemVersions.versionNumber));
+}
+
+export async function getMenuAdminOverview(params: {
+  propertyId: string;
+  session: FnbStaffSession;
+}) {
+  await requirePermission(params.session, params.propertyId, "commercial.view");
+  try {
+    return await getDatabase()
+      .select({
+        categoryId: menuCategories.id,
+        categoryCode: menuCategories.code,
+        categoryNameId: menuCategories.nameId,
+        categoryNameEn: menuCategories.nameEn,
+        categoryStatus: menuCategories.status,
+        categorySortOrder: menuCategories.sortOrder,
+        itemId: menuItems.id,
+        itemCode: menuItems.code,
+        itemSortOrder: menuItems.sortOrder,
+        itemStatus: menuItems.status,
+        currentlyAvailable: menuItems.currentlyAvailable,
+        versionId: menuItemVersions.id,
+        versionNumber: menuItemVersions.versionNumber,
+        nameId: menuItemVersions.nameId,
+        nameEn: menuItemVersions.nameEn,
+        priceIdr: menuItemVersions.priceIdr,
+        taxProfileVersionId: menuItemVersions.taxProfileVersionId,
+        lifecycleStatus: menuItemVersions.lifecycleStatus,
+        effectiveFrom: menuItemVersions.effectiveFrom,
+        effectiveTo: menuItemVersions.effectiveTo,
+      })
+      .from(menuCategories)
+      .leftJoin(menuItems, eq(menuItems.categoryId, menuCategories.id))
+      .leftJoin(menuItemVersions, eq(menuItemVersions.menuItemId, menuItems.id))
+      .where(eq(menuCategories.propertyId, params.propertyId))
+      .orderBy(
+        menuCategories.sortOrder,
+        menuCategories.code,
+        desc(menuItemVersions.versionNumber),
+      );
+  } catch (error) {
+    if (isMenuSortColumnMissing(error)) {
+      return getMenuAdminOverviewLegacy(params);
+    }
+    throw error;
+  }
 }
 
 export async function createMenuCategory(params: {
@@ -427,6 +479,151 @@ export async function setMenuItemAvailability(params: {
         resultType: "menu_item",
         resultId: item.id,
         response: { menuItemId: item.id, available: params.available },
+      };
+    },
+  );
+}
+
+export async function setMenuCategorySortOrder(params: {
+  propertyId: string;
+  session: FnbStaffSession;
+  idempotencyKey: string;
+  categoryId: string;
+  sortOrder: number;
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "commercial.manage",
+  );
+  return withIdempotency(
+    {
+      scope: "commercial.menu.category.sort",
+      key: params.idempotencyKey,
+      requestHash: stableRequestHash(params),
+      ownerUserId: params.session.user.id,
+    },
+    async (tx) => {
+      const [category] = await tx
+        .select({
+          id: menuCategories.id,
+          previousSortOrder: menuCategories.sortOrder,
+        })
+        .from(menuCategories)
+        .where(
+          and(
+            eq(menuCategories.id, params.categoryId),
+            eq(menuCategories.propertyId, params.propertyId),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!category) throw new AppError("NOT_FOUND", "Menu category not found");
+      await tx
+        .update(menuCategories)
+        .set({
+          sortOrder: params.sortOrder,
+          updatedAt: new Date(),
+          updatedByUserId: params.session.user.id,
+        })
+        .where(eq(menuCategories.id, category.id));
+      await recordAuditEvent(
+        {
+          propertyId: params.propertyId,
+          actorUserId: params.session.user.id,
+          actorType: "user",
+          action: "commercial.menu.category.sort_order.set",
+          targetType: "menu_category",
+          targetId: category.id,
+          before: { sortOrder: category.previousSortOrder },
+          after: { sortOrder: params.sortOrder },
+          result: "SUCCESS",
+        },
+        tx,
+      );
+      return {
+        resultType: "menu_category",
+        resultId: category.id,
+        response: { categoryId: category.id, sortOrder: params.sortOrder },
+      };
+    },
+  );
+}
+
+export async function setMenuItemSortOrder(params: {
+  propertyId: string;
+  session: FnbStaffSession;
+  idempotencyKey: string;
+  itemId: string;
+  sortOrder: number;
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "commercial.manage",
+  );
+  return withIdempotency(
+    {
+      scope: "commercial.menu.item.sort",
+      key: params.idempotencyKey,
+      requestHash: stableRequestHash(params),
+      ownerUserId: params.session.user.id,
+    },
+    async (tx) => {
+      const [item] = await tx
+        .select({
+          id: menuItems.id,
+          categoryId: menuItems.categoryId,
+          previousSortOrder: menuItems.sortOrder,
+          code: menuItems.code,
+          currentStatus: menuItems.status,
+        })
+        .from(menuItems)
+        .innerJoin(menuCategories, eq(menuCategories.id, menuItems.categoryId))
+        .where(
+          and(
+            eq(menuItems.id, params.itemId),
+            eq(menuCategories.propertyId, params.propertyId),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!item) throw new AppError("NOT_FOUND", "Menu item not found");
+      if (item.currentStatus !== "ACTIVE")
+        throw new AppError(
+          "CONFLICT",
+          "Only active menu items can be reordered",
+        );
+      await tx
+        .update(menuItems)
+        .set({
+          sortOrder: params.sortOrder,
+          updatedAt: new Date(),
+          updatedByUserId: params.session.user.id,
+        })
+        .where(eq(menuItems.id, item.id));
+      await recordAuditEvent(
+        {
+          propertyId: params.propertyId,
+          actorUserId: params.session.user.id,
+          actorType: "user",
+          action: "commercial.menu.item.sort_order.set",
+          targetType: "menu_item",
+          targetId: item.id,
+          before: { sortOrder: item.previousSortOrder },
+          after: { sortOrder: params.sortOrder },
+          result: "SUCCESS",
+        },
+        tx,
+      );
+      return {
+        resultType: "menu_item",
+        resultId: item.id,
+        response: {
+          itemId: item.id,
+          itemCode: item.code,
+          sortOrder: params.sortOrder,
+        },
       };
     },
   );

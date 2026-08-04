@@ -153,6 +153,7 @@ export const menuItems = pgTable(
     id: id(),
     categoryId: uuid("category_id").notNull().references(() => menuCategories.id, { onDelete: "restrict" }),
     code: varchar("code", { length: 64 }).notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
     status: status().notNull().default("ACTIVE"),
     currentlyAvailable: boolean("currently_available").notNull().default(true),
     ...trackedColumns,
