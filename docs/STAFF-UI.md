@@ -62,7 +62,7 @@ Seluruh route selain login dilindungi session di server. Menu hanya muncul bila 
 - Stay workflow mencakup check-in/out, no-show dengan room retained/release, initial room assignment, maintenance block, dan room move dengan no-change/charge/credit.
 - KTP/foto tamu/tanda tangan bersifat opsional. Foto memakai camera/file picker browser; tanda tangan memakai canvas tablet. File disimpan privat sebagai sensitive guest data lalu direferensikan oleh registration record.
 - Folio workspace menerbitkan proforma/invoice/receipt/refund note/folio statement secara combined atau room-only, mencatat damage charge, dan membuat refund manual.
-- Owner/Admin workspace menyediakan profil properti, room unit/amenity, tax dan kurs tampilan, CMS authentic media, menu category, staff role, audit trail, daily rollover, reconciliation, serta CSV export.
+- Owner/Admin workspace menyediakan profil properti, room unit/amenity, tax dan kurs tampilan, CMS authentic media, menu category, staff role, audit trail, daily rollover, reconciliation, serta export Excel.
 - Semua form terstruktur; pengguna tidak diminta menulis JSON atau mengakses database langsung.
 
 ## State dan aksesibilitas baseline

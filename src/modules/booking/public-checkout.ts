@@ -4,13 +4,13 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { getDatabase } from "../../db";
 import {
-  paymentInstructionVersions,
   policySets,
   policyVersions,
   ratePlans,
   ratePlanVersions,
 } from "../../db/schema";
 import { AppError } from "../../platform/errors";
+import { resolveActivePaymentInstructions } from "./payment-instructions";
 
 function isEffective(
   row: { effectiveFrom: Date; effectiveTo: Date | null },
@@ -28,7 +28,6 @@ export async function getPublicCheckoutPolicies(
   const plans = await db
     .select({
       cancellationPolicySetId: ratePlanVersions.cancellationPolicySetId,
-      paymentInstructionSetId: ratePlanVersions.paymentInstructionSetId,
       lifecycleStatus: ratePlanVersions.lifecycleStatus,
       sourceEligibility: ratePlanVersions.sourceEligibility,
       effectiveFrom: ratePlanVersions.effectiveFrom,
@@ -51,29 +50,12 @@ export async function getPublicCheckoutPolicies(
       ["ALL", "ONLINE"].includes(row.sourceEligibility),
   );
   if (!plan) throw new AppError("NOT_FOUND", "No eligible rate plan");
-  if (!plan.paymentInstructionSetId) {
-    throw new AppError("CONFLICT", "Payment instruction is not configured");
-  }
-  const paymentInstructions = await db
-    .select({
-      effectiveFrom: paymentInstructionVersions.effectiveFrom,
-      effectiveTo: paymentInstructionVersions.effectiveTo,
-    })
-    .from(paymentInstructionVersions)
-    .where(
-      and(
-        eq(
-          paymentInstructionVersions.instructionSetId,
-          plan.paymentInstructionSetId,
-        ),
-        inArray(paymentInstructionVersions.lifecycleStatus, [
-          "ACTIVE",
-          "SCHEDULED",
-        ]),
-      ),
-    )
-    .orderBy(desc(paymentInstructionVersions.effectiveFrom));
-  if (!paymentInstructions.some((row) => isEffective(row, now))) {
+  const paymentInstructions = await resolveActivePaymentInstructions(
+    db,
+    propertyId,
+    now,
+  );
+  if (!paymentInstructions.length) {
     throw new AppError("CONFLICT", "Payment instruction is not configured");
   }
 

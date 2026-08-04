@@ -29,7 +29,10 @@ vi.mock("../../src/platform/authorization", () => ({
   requirePermission: mocks.requirePermission,
 }));
 
-import { getFrontOfficeCatalog } from "../../src/modules/operations/front-office-catalog";
+import {
+  getFrontOfficeCatalog,
+  normalizeCatalogDate,
+} from "../../src/modules/operations/front-office-catalog";
 
 const U1 = "11111111-1111-4111-a111-111111111111";
 
@@ -37,6 +40,12 @@ describe("Front Office operational catalogue", () => {
   beforeEach(() => {
     mocks.select.mockReset();
     mocks.requirePermission.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("normalizes PostgreSQL DATE objects for client-side availability checks", () => {
+    const databaseDate = new Date(2026, 7, 4);
+    expect(normalizeCatalogDate(databaseDate)).toBe("2026-08-04");
+    expect(normalizeCatalogDate("2026-08-04T00:00:00.000Z")).toBe("2026-08-04");
   });
 
   it("returns active booking products and physical rooms without Admin permission", async () => {
@@ -85,6 +94,17 @@ describe("Front Office operational catalogue", () => {
       )
       .mockImplementationOnce(() =>
         selection([{ roomUnitId: "room-1", stayDate: "2026-08-03" }]),
+      )
+      .mockImplementationOnce(() =>
+        selection([
+          {
+            instructionSetId: "bank-1",
+            id: "bank-version-1",
+            bankName: "BCA",
+            accountHolder: "KOOKA Residence",
+            accountNumberLast4: "9012",
+          },
+        ]),
       );
 
     const result = await getFrontOfficeCatalog({
@@ -112,5 +132,13 @@ describe("Front Office operational catalogue", () => {
       },
     ]);
     expect(result.ratePlans).toHaveLength(1);
+    expect(result.paymentInstructions).toEqual([
+      {
+        paymentInstructionVersionId: "bank-version-1",
+        bankName: "BCA",
+        accountHolder: "KOOKA Residence",
+        accountNumberLast4: "9012",
+      },
+    ]);
   });
 });

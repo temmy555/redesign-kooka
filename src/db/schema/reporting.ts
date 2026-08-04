@@ -89,7 +89,7 @@ export const reconciliationExceptions = pgTable(
   ],
 );
 
-/** Metadata for an authenticated, permission-checked CSV download. */
+/** Metadata for an authenticated, permission-checked report download. */
 export const reportExports = pgTable(
   "report_exports",
   {
@@ -98,7 +98,7 @@ export const reportExports = pgTable(
       .notNull()
       .references(() => properties.id, { onDelete: "restrict" }),
     reportCode: varchar("report_code", { length: 80 }).notNull(),
-    format: varchar("format", { length: 16 }).notNull().default("CSV"),
+    format: varchar("format", { length: 16 }).notNull().default("XLSX"),
     status: status().notNull().default("GENERATED"),
     filters: jsonb("filters").$type<Record<string, unknown>>().notNull(),
     timezone: varchar("timezone", { length: 64 })
@@ -125,7 +125,7 @@ export const reportExports = pgTable(
       table.generatedAt,
       table.reportCode,
     ),
-    check("ck_report_export_format", sql`${table.format} = 'CSV'`),
+    check("ck_report_export_format", sql`${table.format} in ('CSV', 'XLSX')`),
     check(
       "ck_report_export_status",
       sql`${table.status} in ('GENERATED', 'DOWNLOADED', 'EXPIRED')`,

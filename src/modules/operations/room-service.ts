@@ -73,12 +73,15 @@ export async function getRoomBoard(params: {
     bookingCode: string | null;
     guestName: string | null;
     nextArrivalAt: Date | null;
+    nextArrivalBookingCode: string | null;
+    nextArrivalGuestName: string | null;
     updatedAt: Date;
   }>(sql`
     select
       u.id as "roomUnitId", u.room_number as "roomNumber",
       tp.room_type_id as "roomTypeId",
-      coalesce(s.occupancy_status, 'VACANT') as "occupancyStatus",
+      case when current_assignment.id is not null then 'OCCUPIED'
+           else coalesce(s.occupancy_status, 'VACANT') end as "occupancyStatus",
       coalesce(s.housekeeping_status, 'DIRTY') as "housekeepingStatus",
       coalesce(s.serviceability_status, 'IN_SERVICE') as "serviceabilityStatus",
       current_assignment.id as "assignmentId",
@@ -87,6 +90,8 @@ export async function getRoomBoard(params: {
       current_assignment.booking_code as "bookingCode",
       current_assignment.guest_name as "guestName",
       next_arrival.planned_arrival_at as "nextArrivalAt",
+      next_arrival.booking_code as "nextArrivalBookingCode",
+      next_arrival.guest_name as "nextArrivalGuestName",
       greatest(u.updated_at, coalesce(s.changed_at, u.updated_at)) as "updatedAt"
     from room_units u
     left join room_unit_states s on s.room_unit_id = u.id
@@ -100,25 +105,36 @@ export async function getRoomBoard(params: {
     ) tp on true
     left join lateral (
       select a.id, a.room_stay_id, st.status as stay_status,
-             r.booking_code, g.full_name as guest_name
+             r.booking_code, coalesce(g.full_name, r.booker_name) as guest_name
       from room_assignments a
       join room_stays st on st.id = a.room_stay_id
       join reservation_rooms rr on rr.id = st.reservation_room_id
       join reservations r on r.id = rr.reservation_id
       left join guests g on g.id = st.lead_guest_id
       where a.room_unit_id = u.id
-        and a.status in ('PLANNED', 'ACTIVE')
+        and a.status = 'ACTIVE'
+        and st.status in ('IN_HOUSE', 'DUE_OUT')
+        and rr.line_status = 'ACTIVE'
+        and r.status = 'CONFIRMED'
         and a.effective_from <= ${at}
         and (a.effective_to is null or a.effective_to > ${at})
       order by a.effective_from desc limit 1
     ) current_assignment on true
     left join lateral (
-      select st.planned_arrival_at
+      select st.planned_arrival_at,
+             r.booking_code,
+             coalesce(g.full_name, r.booker_name) as guest_name
       from room_assignments a
       join room_stays st on st.id = a.room_stay_id
-      where a.room_unit_id = u.id and a.status in ('PLANNED', 'ACTIVE')
-        and st.planned_arrival_at > ${at}
-      order by st.planned_arrival_at asc limit 1
+      join reservation_rooms rr on rr.id = st.reservation_room_id
+      join reservations r on r.id = rr.reservation_id
+      left join guests g on g.id = st.lead_guest_id
+      where a.room_unit_id = u.id and a.status = 'PLANNED'
+        and st.status in ('NOT_STARTED', 'DUE_IN')
+        and rr.line_status = 'ACTIVE'
+        and r.status in ('ON_HOLD', 'CONFIRMED')
+        and coalesce(st.planned_departure_at, a.effective_to) > ${at}
+      order by st.planned_arrival_at asc, r.booking_code asc limit 1
     ) next_arrival on true
     where u.property_id = ${params.propertyId} and u.status = 'ACTIVE'
     order by u.sort_order, u.room_number
@@ -134,6 +150,12 @@ export async function getRoomBoard(params: {
       bookingCode: sharedDisplay
         ? (room.bookingCode?.slice(-4) ?? null)
         : room.bookingCode,
+      nextArrivalGuestName: sharedDisplay
+        ? maskGuestName(room.nextArrivalGuestName)
+        : room.nextArrivalGuestName,
+      nextArrivalBookingCode: sharedDisplay
+        ? (room.nextArrivalBookingCode?.slice(-4) ?? null)
+        : room.nextArrivalBookingCode,
     })),
   };
 }
@@ -277,6 +299,42 @@ export async function assignRoom(params: {
           "Stay already has an active room assignment",
         );
 
+      const plannedArrivalAt =
+        stay.plannedArrivalAt ??
+        jakartaBusinessTimestamp(line.checkInDate, "14:00");
+      const plannedDepartureAt =
+        stay.plannedDepartureAt ??
+        jakartaBusinessTimestamp(line.checkoutDate, "12:00");
+      const overlappingAssignment = await tx.execute<{ id: string }>(sql`
+        select a.id
+        from room_assignments a
+        join room_stays existing_stay on existing_stay.id = a.room_stay_id
+        join reservation_rooms existing_line
+          on existing_line.id = existing_stay.reservation_room_id
+        join reservations existing_reservation
+          on existing_reservation.id = existing_line.reservation_id
+        where a.room_unit_id = ${params.roomUnitId}
+          and a.room_stay_id <> ${stay.id}
+          and a.status in ('PLANNED', 'ACTIVE')
+          and existing_stay.status not in ('CHECKED_OUT', 'NO_SHOW')
+          and existing_line.line_status = 'ACTIVE'
+          and existing_reservation.status in ('ON_HOLD', 'CONFIRMED')
+          and a.effective_from < ${plannedDepartureAt}
+          and coalesce(
+            a.effective_to,
+            existing_stay.planned_departure_at,
+            'infinity'::timestamptz
+          ) > ${plannedArrivalAt}
+        order by a.effective_from
+        limit 1
+        for update of a
+      `);
+      if (overlappingAssignment.rows.length)
+        throw new AppError(
+          "CONFLICT",
+          "Room already has another booking for the selected stay period",
+        );
+
       const stayDates = enumerateStayDates(line.checkInDate, line.checkoutDate);
       const [conflictingClaim] = await tx
         .select({ id: roomUnitNightClaims.id })
@@ -300,8 +358,8 @@ export async function assignRoom(params: {
         .values({
           roomStayId: stay.id,
           roomUnitId: params.roomUnitId,
-          effectiveFrom: stay.plannedArrivalAt ?? new Date(),
-          effectiveTo: stay.plannedDepartureAt,
+          effectiveFrom: plannedArrivalAt,
+          effectiveTo: plannedDepartureAt,
           status: "PLANNED",
           assignedByUserId: params.session.user.id,
           reason: params.reason,
@@ -504,6 +562,7 @@ export async function moveRoom(params: {
           fromUnitId: roomAssignments.roomUnitId,
           reservationRoomId: roomStays.reservationRoomId,
           status: roomStays.status,
+          actualCheckInAt: roomStays.actualCheckInAt,
           effectiveFrom: roomAssignments.effectiveFrom,
           checkoutDate: reservationRooms.checkoutDate,
           reservationId: reservationRooms.reservationId,
@@ -605,17 +664,25 @@ export async function moveRoom(params: {
       if (conflictingClaim)
         throw new AppError(
           "CONFLICT",
-          "Destination room is not available for the remaining stay period",
+          "Kamar tujuan sudah digunakan atau dialokasikan untuk sisa masa inap. Pilih kamar lain.",
         );
       const requestedEffectiveAt = jakartaBusinessTimestamp(
         params.effectiveOn,
         "12:00",
       );
+      const moveNow = new Date();
+      const assignmentEffectiveFrom =
+        current.status !== "DUE_IN" &&
+        current.actualCheckInAt &&
+        current.actualCheckInAt < current.effectiveFrom
+          ? current.actualCheckInAt
+          : current.effectiveFrom;
+      const requestedMoveAt =
+        current.status === "DUE_IN" ? requestedEffectiveAt : moveNow;
       const effectiveAt =
-        current.status === "DUE_IN" &&
-        requestedEffectiveAt < current.effectiveFrom
-          ? current.effectiveFrom
-          : requestedEffectiveAt;
+        requestedMoveAt <= assignmentEffectiveFrom
+          ? new Date(assignmentEffectiveFrom.getTime() + 1)
+          : requestedMoveAt;
       const [toAssignment] = await tx
         .insert(roomAssignments)
         .values({
@@ -678,7 +745,12 @@ export async function moveRoom(params: {
         .update(roomAssignments)
         .set({
           status: "RELEASED",
-          ...(current.status === "DUE_IN" ? {} : { effectiveTo: effectiveAt }),
+          ...(current.status === "DUE_IN"
+            ? {}
+            : {
+                effectiveFrom: assignmentEffectiveFrom,
+                effectiveTo: effectiveAt,
+              }),
           updatedByUserId: params.session.user.id,
         })
         .where(eq(roomAssignments.id, current.assignmentId));
@@ -771,7 +843,10 @@ export async function moveRoom(params: {
           .where(eq(folios.reservationId, current.reservationId))
           .limit(1);
         if (!folio)
-          throw new AppError("CONFLICT", "Reservation folio is missing");
+          throw new AppError(
+            "CONFLICT",
+            "Data tagihan booking tidak ditemukan",
+          );
         await tx.insert(folioEntries).values({
           folioId: folio.id,
           entryType: params.priceTreatment === "CHARGE" ? "DEBIT" : "CREDIT",

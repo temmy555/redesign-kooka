@@ -100,9 +100,9 @@ const guestCopyReplacements: Record<string, string> = {
   "No. All room rates are room-only, and food can be ordered separately.":
     "Breakfast is not included in the room rate. Food and drinks can be ordered separately during your stay.",
   "Waktu default check-in pukul 14.00 dan checkout pukul 12.00. Permintaan lebih awal atau lebih lambat memerlukan konfirmasi Front Office dan bergantung pada kesiapan kamar.":
-    "Check-in dimulai pukul 14.00 dan checkout paling lambat pukul 12.00. Permintaan waktu khusus dapat disampaikan sebelum kedatangan dan menyesuaikan kesiapan kamar.",
+    "Jadwal standar check-in pukul 14.00 dan checkout pukul 12.00. Waktu kedatangan lebih awal atau lebih malam dapat dibicarakan langsung dengan Front Office dan menyesuaikan kesiapan kamar.",
   "Default check-in is 14:00 and checkout is 12:00. Earlier or later requests require Front Office confirmation and depend on room readiness.":
-    "Check-in begins at 14:00 and checkout is by 12:00. Special timing requests may be shared before arrival and remain subject to room readiness.",
+    "Standard check-in is at 14:00 and checkout is at 12:00. Earlier or late-night arrivals can be arranged directly with Front Office, subject to room readiness.",
   "Tamu memilih tipe kamar. Nomor kamar fisik dialokasikan Front Office sesuai ketersediaan dan kesiapan kamar.":
     "Anda memilih tipe kamar saat reservasi. Nomor kamar akan kami siapkan berdasarkan ketersediaan pada hari kedatangan.",
   "Guests choose a room type. Front Office assigns the physical room number according to availability and readiness.":

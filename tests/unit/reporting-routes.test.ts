@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   runDailyRollover: vi.fn(),
   runReconciliation: vi.fn(),
   updateReconciliationException: vi.fn(),
-  createCsvReportExport: vi.fn(),
+  createExcelReportExport: vi.fn(),
 }));
 
 vi.mock("../../src/platform/session", () => ({
@@ -21,7 +21,7 @@ vi.mock("../../src/modules/reporting/reporting-service", () => ({
   runDailyRollover: mocks.runDailyRollover,
   runReconciliation: mocks.runReconciliation,
   updateReconciliationException: mocks.updateReconciliationException,
-  createCsvReportExport: mocks.createCsvReportExport,
+  createExcelReportExport: mocks.createExcelReportExport,
 }));
 
 import { GET, POST } from "../../app/api/staff/reports/route";
@@ -51,10 +51,15 @@ describe("Batch 6 reporting route", () => {
     mocks.updateReconciliationException.mockResolvedValue({
       status: "RESOLVED",
     });
-    mocks.createCsvReportExport.mockResolvedValue({
+    mocks.createExcelReportExport.mockResolvedValue({
       reportExportId: U1,
-      filename: "report.csv",
-      csv: "one,two\r\n",
+      filename: "report.xlsx",
+      sheetName: "Booking",
+      title: "Laporan Booking",
+      subtitle: "Periode UAT",
+      headers: ["Kode booking", "Status"],
+      columnWidths: [24, 18],
+      rows: [["KR-001", "CONFIRMED"]],
       rowCount: 1,
     });
   });
@@ -98,20 +103,24 @@ describe("Batch 6 reporting route", () => {
     expect(mocks[service as keyof typeof mocks]).toHaveBeenCalledOnce();
   });
 
-  it("downloads CSV privately with export metadata", async () => {
+  it("downloads a real Excel workbook privately with export metadata", async () => {
     const response = await POST(
       request({
-        action: "EXPORT_CSV",
+        action: "EXPORT_EXCEL",
         reportCode: "BOOKINGS",
         rangeStart: "2026-08-01",
         rangeEnd: "2026-08-02",
       }),
     );
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(response.headers.get("content-type")).toContain(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
     expect(response.headers.get("cache-control")).toContain("no-store");
     expect(response.headers.get("x-report-export-id")).toBe(U1);
-    expect(await response.text()).toContain("one,two");
+    expect(
+      Array.from(new Uint8Array(await response.arrayBuffer()).slice(0, 4)),
+    ).toEqual([0x50, 0x4b, 0x03, 0x04]);
   });
 
   it("rejects missing idempotency, bad payload, and unauthenticated access", async () => {

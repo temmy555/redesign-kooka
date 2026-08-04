@@ -1,0 +1,98 @@
+name: kooka-production
+
+services:
+  postgres:
+    image: postgres:18.4-alpine3.23
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+      TZ: ${TZ:-Asia/Jakarta}
+      PGTZ: ${TZ:-Asia/Jakarta}
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - timezone=Asia/Jakarta
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - backend
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - ../.env.production
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PRIVATE_STORAGE_ROOT: /app/.data/private-files
+      REDIS_URL: ""
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - 127.0.0.1:${APP_PORT:-3000}:3000
+    volumes:
+      - private_files:/app/.data/private-files
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command:
+      - node
+      - scripts/worker.mjs
+    env_file:
+      - ../.env.production
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PRIVATE_STORAGE_ROOT: /app/.data/private-files
+      REDIS_URL: ""
+      NODE_ENV: production
+    volumes:
+      - private_files:/app/.data/private-files
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  private_files:
+    labels:
+      com.kooka.storage.classification: private-sensitive

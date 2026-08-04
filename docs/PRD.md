@@ -111,7 +111,7 @@ Memiliki seluruh akses, termasuk pengguna dan role, konfigurasi pembayaran, harg
 
 - Mengakses POS, menu, harga, ketersediaan item, dan antrean order.
 - Membuat transaksi standalone atau membebankan transaksi ke kamar/folio.
-- Mengubah status order: `New`, `Preparing`, `Ready/Served`, `Completed`, `Cancelled`.
+- Pesanan baru langsung berstatus `Sedang diproses`; staf mengubahnya menjadi `Selesai/disajikan` atau `Dibatalkan`.
 - Tidak dapat mengubah booking, tarif kamar, pembayaran kamar, atau refund tanpa hak tambahan.
 
 ### 4.6 Employee / Staff Mobile
@@ -358,7 +358,7 @@ Pembayaran tunai atau pembayaran lain yang diterima langsung dapat dibuat sebaga
 
 ### 7.4 Konfirmasi WhatsApp
 
-Rekening/payment instruction dikelola sebagai master configuration, bukan teks bebas. Data minimum mencakup nama bank, nomor rekening, nama pemilik, currency `IDR`, status, effective period, serta display/instruction text bilingual bila diperlukan. Beberapa rekening dapat tersedia, tetapi booking hanya menampilkan rekening aktif yang dipilih rule dan menyimpan instruction snapshot yang diterimanya.
+Rekening/payment instruction dikelola sebagai master configuration pada level properti, bukan teks bebas dan bukan dipilih per kamar/rate plan. Data minimum mencakup nama bank, nomor rekening, nama pemilik, currency `IDR`, status, effective period, serta display/instruction text bilingual bila diperlukan. Semua rekening properti yang aktif ditampilkan sebagai pilihan transfer untuk setiap booking online. Booking menyimpan seluruh versi rekening yang ditawarkan sebagai immutable instruction snapshot; Front Office mencatat rekening tujuan yang benar-benar menerima pembayaran saat memasukkan bukti transfer.
 
 Perubahan rekening merupakan high-risk action: Owner approval/self-approval dengan reason wajib, impact preview, audit, dan security alert. Booking lama tidak berubah otomatis. Replacement hanya melalui `Reissue Payment Instruction` untuk booking target yang dipilih atau approved batch dengan preview, customer notification, dan histori old/new instruction; reissue tidak mengubah total/payment status dengan sendirinya.
 
@@ -512,6 +512,8 @@ Additional charge/credit dibuat sebagai folio adjustment tanpa menghapus nightly
 ### 8.7 Early check-in, late checkout, dan ETA
 
 - Customer dapat menyampaikan ETA atau request, tetapi early check-in/late checkout hanya diputuskan langsung oleh Front Office/Owner dan tidak dijamin oleh form booking.
+- Jam `14:00`/`12:00` adalah jadwal standar, bukan cutoff transaksi. Early check-in serta late arrival/check-in tidak mempunyai batas jam global selama masa booking masih berlaku dan unit siap; no-show tidak pernah dibuat otomatis hanya karena jam kedatangan terlewati.
+- Late checkout tidak mempunyai batas jam global, tetapi tetap harus disetujui berdasarkan dampak ke kamar dan booking berikutnya; penggunaan yang masuk malam berikutnya memakai extension.
 - Request lifecycle: `Requested → Approved / Rejected / Cancelled → Completed`; status request terpisah dari reservation, stay, occupancy, housekeeping, folio, dan payment.
 - Early check-in hanya disetujui jika reservation confirmed, unit assigned, previous guest telah checkout, serta unit memenuhi seluruh `Ready for Check-in` guard.
 - Late checkout ditolak jika unit dibutuhkan confirmed next arrival, tamu berikutnya sudah menunggu/akan segera tiba, turnover window tidak cukup, properti/room type penuh tanpa alternatif valid, atau operational requirement mengharuskan unit kosong.
@@ -905,7 +907,7 @@ Modul complaint/ticket lengkap ditunda ke Phase 2 karena belum menjadi kebutuhan
   - **Room charge:** ditambahkan ke folio booking yang sedang checked-in.
 - Untuk room charge, staff harus memverifikasi nomor kamar dan nama/identitas ringan tamu untuk mencegah salah tagih.
 - Order/fulfillment status, payment status, dan folio posting status disimpan terpisah.
-- Order lifecycle: `Draft`, `New`, `Accepted`, `Preparing`, `Ready`, `Served`, `Completed`, atau `Cancelled`.
+- Antarmuka F&B memakai lifecycle sederhana `Sedang diproses → Selesai/disajikan`, dengan `Dibatalkan` sebagai jalur exception. Pesanan baru langsung masuk tahap `Sedang diproses`; status internal yang lebih rinci tetap dikenali hanya untuk kompatibilitas histori dan audit.
 - Settlement route dapat `Standalone`, `Room Charge`, atau `Split` bila diaktifkan. Folio posting status minimal `Not Posted`, `Posted`, atau `Reversed`.
 - Room charge normal memerlukan stay `In House`, active assignment, Room Lead Guest verification, charge privilege, billing bucket/payer, folio guard, dan confirmation step.
 - Charge privilege minimal `Allowed`, `Not Allowed`, atau `Front Office Confirmation Required`; high-value/company billing dapat memerlukan konfirmasi Front Office, reason, dan audit tetapi tidak Owner approval.
@@ -1100,7 +1102,7 @@ Entitas tambahan yang diperlukan: property root, configuration/master definition
 - Sistem menyimpan timestamp aktual, service date, dan business date secara terpisah.
 - Rollover menghitung due-in/due-out, membuat housekeeping task, menandai exception, dan melakukan reconciliation secara idempotent tanpa memblokir Front Office.
 - Daily operations memiliki `Open`, `Needs Attention`, dan `Closed`; Owner dapat `Close with Exceptions` dengan alasan serta audit.
-- No-show final merupakan action manual setelah cutoff dan contact attempt. Untuk booking guaranteed, action no-show tidak otomatis melepaskan inventory.
+- No-show final merupakan action manual berdasarkan komunikasi serta keputusan Front Office yang dicatat; tidak ada cutoff waktu otomatis. Untuk booking guaranteed, action no-show tidak otomatis melepaskan inventory.
 - `Retain Until Original Checkout` menjadi inventory disposition default booking online guaranteed. Front Office dengan permission khusus dapat menjalankan `Release Remaining Nights` tanpa Owner approval, dengan contact attempt, alasan, policy snapshot, affected nights/quantity, konsekuensi finansial, serta audit.
 - Jika guest datang pukul 00:00 dan commitment masih dipertahankan, guest dapat check-in setelah assignment serta room readiness valid. Checkout asli tidak berubah.
 - Aturan rinci tersedia di [STAY-OPERATIONS-DAILY-CLOSE.md](STAY-OPERATIONS-DAILY-CLOSE.md).
@@ -1450,6 +1452,7 @@ Phase 1B adalah workstream tambahan dalam modular web application yang sama. Pen
 ### Early check-in dan late checkout
 
 - Default jam standar properti adalah check-in `14:00` dan checkout `12:00` dalam `Asia/Jakarta`. Keduanya configurable, versioned/effective-dated, diaudit, dan menjadi policy snapshot booking; perubahan tidak berlaku retroaktif secara diam-diam.
+- Jam tersebut hanya acuan. Sistem tidak menerapkan earliest early check-in, latest late arrival, atau no-show cutoff otomatis; Front Office mengambil keputusan langsung di lokasi selama periode booking masih berlaku.
 - ETA/request customer tidak menjadi jaminan atau mengubah tanggal, harga, stay, maupun inventory dengan sendirinya.
 - Hanya Front Office/Owner berizin yang dapat approve/reject; decision menyimpan requested/approved time, snapshot readiness/conflict, reason, actor, dan audit.
 - Early check-in ditolak jika previous guest belum checkout, unit belum assigned, atau unit belum `Ready for Check-in`.
@@ -1777,7 +1780,7 @@ Bagian ini menyimpan nilai kebijakan, master data, threshold, role, content, dan
 71. Jenis akses kamar apa yang digunakan saat ini: kunci fisik, key card, smart lock, atau kombinasi?
 72. Berapa salinan kunci per kamar, siapa yang menjaga master key, dan bagaimana SOP issue/return Phase 1?
 73. Kapan volume/risiko kehilangan kunci membenarkan key-tracking Phase 2 dan apakah ada rencana hardware smart lock/key-card Phase 3?
-74. Jam standar default disetujui: check-in `14:00` dan checkout `12:00`; earliest early check-in serta latest late checkout juga configurable dan nilai produksinya akan diisi Owner sebelum UAT/go-live.
+74. Diputuskan: jam standar check-in `14:00` dan checkout `12:00` hanya menjadi acuan. Early check-in, late arrival/check-in, dan late checkout tidak memakai cutoff jam global; keputusan langsung Front Office tetap memakai readiness, next-arrival, extension, reason, dan audit guard.
 75. Berapa minimum cleaning/inspection buffer dan threshold kedatangan berikutnya dianggap terlalu dekat/menunggu?
 76. Pukul berapa late checkout harus dikonversi menjadi extension malam berikutnya?
 77. Berapa harga, basis, serta tax/service profile/No Tax untuk early check-in/late checkout? Front Office berizin dapat mengisi/waive tanpa Owner approval dengan reason dan audit.

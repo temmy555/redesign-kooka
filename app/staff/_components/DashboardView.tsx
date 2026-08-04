@@ -46,6 +46,25 @@ const queueLabels: Record<string, string> = {
   PAYMENT_REVIEW: "Verifikasi pembayaran",
 };
 
+const queueActions: Record<string, { href: string; label: string }> = {
+  ARRIVAL: {
+    href: "/staff/front-office?tab=stay",
+    label: "Proses kedatangan",
+  },
+  DEPARTURE: {
+    href: "/staff/front-office?tab=stay",
+    label: "Proses checkout",
+  },
+  UNASSIGNED: {
+    href: "/staff/front-office?tab=stay",
+    label: "Alokasikan kamar",
+  },
+  PAYMENT_REVIEW: {
+    href: "/staff/front-office?tab=payment",
+    label: "Periksa pembayaran",
+  },
+};
+
 function number(value: number | undefined) {
   return new Intl.NumberFormat("id-ID").format(value ?? 0);
 }
@@ -70,15 +89,30 @@ function time(value: string | null) {
 }
 
 function humanStatus(value: string) {
+  const labels: Record<string, string> = {
+    CHECKOUT_PENDING: "Checkout perlu diproses",
+    FOLIO_UNSETTLED: "Tagihan belum lunas",
+    ROOM_UNASSIGNED: "Kamar belum dialokasikan",
+    STALE: "Menunggu verifikasi",
+  };
+  if (labels[value]) return labels[value];
   return value.replaceAll("_", " ").toLocaleLowerCase("id-ID");
 }
 
 function QueuePanel({ type, rows }: { type: string; rows: StaffQueueItem[] }) {
+  const action = queueActions[type];
   return (
     <section className={styles.panel}>
       <div className={styles.panelHeader}>
         <h2>{queueLabels[type] ?? type}</h2>
-        <span className={styles.countPill}>{rows.length}</span>
+        <div className={styles.panelHeaderActions}>
+          <span className={styles.countPill}>{rows.length}</span>
+          {action ? (
+            <Link className={styles.panelAction} href={action.href}>
+              {action.label}
+            </Link>
+          ) : null}
+        </div>
       </div>
       {rows.length ? (
         <ul className={styles.queueList}>
@@ -96,14 +130,33 @@ function QueuePanel({ type, rows }: { type: string; rows: StaffQueueItem[] }) {
               <div className={styles.queueMeta}>
                 <strong>{time(row.scheduledAt)}</strong>
                 <small>{humanStatus(row.status)}</small>
+                {row.amountIdr && Math.abs(Number(row.amountIdr)) >= 0.5 ? (
+                  <small className={styles.queueAmount}>
+                    Sisa tagihan {formatIdr(Number(row.amountIdr))}
+                  </small>
+                ) : null}
               </div>
-              {row.alert ? (
-                <span className={styles.alertPill}>
-                  {humanStatus(row.alert)}
-                </span>
-              ) : (
-                <span className={styles.statusPill}>Terpantau</span>
-              )}
+              <div className={styles.queueActions}>
+                {row.alert ? (
+                  <span className={styles.alertPill}>
+                    {humanStatus(row.alert)}
+                  </span>
+                ) : (
+                  <span className={styles.statusPill}>Terpantau</span>
+                )}
+                {action ? (
+                  <Link
+                    className={styles.queueOpenAction}
+                    href={
+                      ["ARRIVAL", "DEPARTURE", "UNASSIGNED"].includes(type)
+                        ? `${action.href}&reservationRoomId=${encodeURIComponent(row.entityId)}&action=${type === "DEPARTURE" ? "CHECK_OUT" : "CHECK_IN"}`
+                        : action.href
+                    }
+                  >
+                    Buka
+                  </Link>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>
@@ -158,6 +211,7 @@ export default function DashboardView({
   const payment = data.queues.PAYMENT_REVIEW ?? [];
   const attention =
     unassigned.length +
+    departures.filter((item) => item.alert).length +
     payment.filter((item) => item.alert).length +
     data.reconciliation.criticalCount;
   const updated = new Intl.DateTimeFormat("id-ID", {
@@ -200,27 +254,52 @@ export default function DashboardView({
             {number(data.summary.physical_rooms)}
           </strong>
           <small>{number(data.summary.occupancyPercent)}% kamar terisi</small>
+          <Link className={styles.metricAction} href="/staff/rooms">
+            Lihat pantauan kamar
+          </Link>
         </article>
         <article className={styles.metricCard}>
           <span>Kedatangan</span>
           <strong>{arrivals.length}</strong>
-          <small>{unassigned.length} belum mendapat nomor kamar</small>
+          <small>
+            {unassigned.length} booking 7 hari ke depan belum mendapat kamar
+          </small>
+          <Link
+            className={styles.metricAction}
+            href="/staff/front-office?tab=stay"
+          >
+            Proses kedatangan
+          </Link>
         </article>
         <article className={styles.metricCard}>
-          <span>Outstanding folio</span>
+          <span>Tagihan belum lunas</span>
           <strong>{formatIdr(data.summary.outstanding_idr)}</strong>
-          <small>Saldo seluruh folio yang masih terbuka</small>
+          <small>
+            Total sisa tagihan dari seluruh booking yang masih terbuka
+          </small>
+          <Link
+            className={styles.metricAction}
+            href="/staff/front-office?tab=folio"
+          >
+            Lihat tagihan dan pelunasan
+          </Link>
         </article>
         <article
           className={`${styles.metricCard} ${attention ? styles.attentionCard : ""}`}
         >
           <span>Perlu perhatian</span>
           <strong>{attention}</strong>
-          <small>Unassigned, pembayaran stale, dan critical exception</small>
+          <small>
+            Booking belum mendapat kamar, pembayaran tertunda, atau data perlu
+            diperiksa
+          </small>
+          <a className={styles.metricAction} href="#attention-queues">
+            Lihat yang perlu ditindaklanjuti
+          </a>
         </article>
       </section>
       <div className={styles.dashboardGrid}>
-        <div className={styles.sideStack}>
+        <div className={styles.sideStack} id="attention-queues">
           <QueuePanel rows={arrivals} type="ARRIVAL" />
           <QueuePanel rows={departures} type="DEPARTURE" />
         </div>

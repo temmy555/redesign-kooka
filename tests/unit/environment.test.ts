@@ -55,6 +55,23 @@ describe("application environment", () => {
     ).toMatchObject({ APP_ENV: "uat" });
   });
 
+  it("accepts production-like environments without Redis for lightweight testing deployments", () => {
+    const productionEnvironment: Record<string, string | undefined> = {
+      ...localEnvironment,
+      APP_ENV: "production",
+      APP_URL: "https://testing.kooka.example.invalid",
+      DATABASE_URL: "postgresql://kooka:secret@postgres.aws.example:5432/kooka",
+      REDIS_URL: undefined,
+      MAILPIT_URL: undefined,
+      PRIVATE_STORAGE_ROOT: "/home/u123456/domains/kooka/private-files",
+    };
+
+    expect(parseApplicationEnvironment(productionEnvironment)).toMatchObject({
+      APP_ENV: "production",
+      REDIS_URL: undefined,
+    });
+  });
+
   it("rejects non-Redis protocols", () => {
     expect(() =>
       parseApplicationEnvironment({

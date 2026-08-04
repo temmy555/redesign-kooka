@@ -1,11 +1,11 @@
 # Availability dan Inventory Locking — KOOKA Residence
 
-| Informasi | Nilai |
-|---|---|
-| Versi | 1.10 Draft |
-| Tanggal | 1 Agustus 2026 |
-| Scope | Phase 1 core lodging; fondasi Phase 2 whole house/package |
-| Sumber kebutuhan | [PRD.md](PRD.md) |
+| Informasi        | Nilai                                                     |
+| ---------------- | --------------------------------------------------------- |
+| Versi            | 1.10 Draft                                                |
+| Tanggal          | 1 Agustus 2026                                            |
+| Scope            | Phase 1 core lodging; fondasi Phase 2 whole house/package |
+| Sumber kebutuhan | [PRD.md](PRD.md)                                          |
 
 ## 1. Tujuan
 
@@ -43,11 +43,11 @@ Room unit adalah kamar fisik. KOOKA menggunakan nomor sederhana dan berurutan ta
 Contoh:
 
 | Nomor kamar | Room type |
-|---|---|
-| `1` | Deluxe |
-| `2` | Executive |
-| `3` | Deluxe |
-| `4` | Family |
+| ----------- | --------- |
+| `1`         | Deluxe    |
+| `2`         | Executive |
+| `3`         | Deluxe    |
+| `4`         | Family    |
 
 Data minimal:
 
@@ -256,7 +256,7 @@ Data historis minimal menyimpan:
 
 ### No-show
 
-- System memberi indikator `Arrival Overdue/Possible No Show` setelah arrival cutoff; indikator tidak melepas inventory atau mengubah status booking.
+- Sistem memberi indikator `Arrival Overdue/Possible No Show` setelah expected arrival terlewati; indikator tidak membatasi late check-in, melepas inventory, atau mengubah status booking.
 - Pada Phase 1, Front Office mengonfirmasi no-show secara manual setelah contact attempt.
 - Booking online yang full payment 100%-nya telah verified adalah guaranteed. Default inventory disposition ketika no-show adalah `Retain Until Original Checkout` untuk seluruh room type/quantity yang dijamin.
 - `Mark No Show` dan `Release Remaining Nights` adalah action terpisah. Front Office berizin dapat melakukan release tanpa Owner approval, tetapi wajib mencatat contact attempt, alasan, policy snapshot, konsekuensi finansial, affected nights/quantity, dan audit.
@@ -387,7 +387,7 @@ Monitor diperbarui near-real-time, menampilkan last-updated/stale warning, memil
 
 - Durasi checkout-session hold final.
 - Durasi payment hold per channel/customer type.
-- Arrival cutoff dan kebijakan pelepasan no-show.
+- SOP contact attempt serta kebijakan manual pelepasan no-show; tidak ada arrival cutoff otomatis.
 - Restriction mana yang aktif pada Phase 1.
 - Verifikasi estimasi sekitar 15 unit serta daftar final nomor kamar, room type, kapasitas, amenity, extra-bed eligibility, serviceability, dan block awal.
 - Jam standar default telah ditetapkan check-in `14:00` dan checkout `12:00` Asia/Jakarta. Earliest/latest early-late limit juga configurable dan akan diisi Owner; nilai produksi, turnover buffer minimum, dan overnight extension threshold masih terbuka sebelum UAT.

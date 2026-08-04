@@ -57,6 +57,7 @@ import {
   requestManualRefund,
   retryFinancialDocumentRender,
   reverseFolioEntry,
+  summarizeFinancialDocumentEntries,
 } from "../../src/modules/operations/finance-service";
 
 const U1 = "11111111-1111-4111-a111-111111111111";
@@ -285,7 +286,7 @@ describe("finance service", () => {
         idempotencyKey: "folio-invalid",
         session,
       }),
-    ).rejects.toThrow("does not match");
+    ).rejects.toThrow("Total tagihan tidak sesuai");
   });
 
   it("reverses an entry without mutating the original", async () => {
@@ -339,6 +340,73 @@ describe("finance service", () => {
       totalIdr: 500000,
     });
     expect(mocks.enqueueOutboxEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueOutboxEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ emailAfterRender: true }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("keeps taxable charges separate from deposit and settlement payments", async () => {
+    const roomCharge = {
+      ...entry,
+      netAmountIdr: "450000",
+      taxAmountIdr: "49500",
+      totalAmountIdr: "499500",
+    };
+    const payment = (id: string, amount: string) => ({
+      ...entry,
+      id,
+      entryType: "CREDIT",
+      category: "PAYMENT",
+      description: `Payment ${id}`,
+      netAmountIdr: amount,
+      taxAmountIdr: "0",
+      totalAmountIdr: amount,
+    });
+    const nanaEntries = [
+      roomCharge,
+      { ...roomCharge, id: U3 },
+      payment("deposit", "300000"),
+      payment("settlement", "699000"),
+    ];
+
+    expect(summarizeFinancialDocumentEntries(nanaEntries)).toMatchObject({
+      subtotalIdr: 900000,
+      taxIdr: 99000,
+      chargeTotalIdr: 999000,
+      paymentsIdr: 999000,
+      balanceIdr: 0,
+    });
+
+    mocks.select
+      .mockReturnValueOnce(
+        chain([{ id: U1, reservationId: U3, bookingCode: "KR-NANA" }]),
+      )
+      .mockReturnValueOnce(chain([{ id: U3 }]))
+      .mockReturnValueOnce(chain(nanaEntries))
+      .mockReturnValueOnce(chain([]));
+    mocks.execute.mockResolvedValue({
+      rows: [{ prefix: "INV", issuedValue: 3, padding: 5 }],
+    });
+    mocks.insert
+      .mockReturnValueOnce(chain([{ id: U2 }]))
+      .mockReturnValueOnce(chain([{ id: U3 }]))
+      .mockReturnValueOnce(chain());
+
+    await expect(
+      issueFinancialDocument({
+        propertyId: U1,
+        folioId: U1,
+        documentType: "INVOICE",
+        scope: "COMBINED",
+        recipientName: "Nana",
+        language: "id",
+        idempotencyKey: "invoice-deposit-settlement",
+        session,
+      }),
+    ).resolves.toMatchObject({ totalIdr: 999000 });
   });
 
   it("supersedes prior invoice coverage when a revised invoice is issued", async () => {
@@ -528,6 +596,7 @@ describe("finance service", () => {
       documentType: "RECEIPT",
       scope: "ROOM_ONLY",
       recipientName: "Sari Dewi",
+      recipientEmail: "sari@example.com",
       language: "en",
       idempotencyKey: "receipt-room-only",
       session,
@@ -536,6 +605,12 @@ describe("finance service", () => {
       documentNumber: "RCT/202608/0002",
       totalIdr: 400000,
     });
+    expect(mocks.enqueueOutboxEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ emailAfterRender: false }),
+      }),
+      expect.anything(),
+    );
   });
 
   it("requires entries for a custom financial document", async () => {
@@ -553,7 +628,7 @@ describe("finance service", () => {
         idempotencyKey: "custom-no-entries",
         session,
       }),
-    ).rejects.toThrow("requires folio entries");
+    ).rejects.toThrow("memerlukan rincian tagihan");
   });
 
   it("records a failed manual refund attempt without a folio entry", async () => {

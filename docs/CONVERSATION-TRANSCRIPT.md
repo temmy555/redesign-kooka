@@ -1316,3 +1316,51 @@ Owner meminta menjalankan Batch 4. Implementasi dibatasi pada Roadmap Langkah 19
 **Pengguna:** Menanyakan bagaimana menangani data tabel yang makin lama makin banyak pada laporan attendance, pesanan F&B, dan daftar booking, lalu menyetujui penerapan rekomendasi.
 
 **Keputusan/asisten:** Menerapkan pagination server-side dengan ukuran halaman berbeda sesuai kepadatan data. Booking/pembayaran memakai 20 baris, F&B 10, attendance 25, dan audit 50; masing-masing memiliki pilihan ukuran halaman, pencarian/filter, jumlah total, rentang baris, serta navigasi halaman. Antrean aktif dipisah dari riwayat agar tindakan operasional tidak hilang ketika membuka halaman riwayat lain. Export Excel attendance mengambil seluruh data yang cocok dengan filter. Live Room Monitor dan housekeeping hari ini tetap tanpa pagination.
+
+## 4 Agustus 2026 — Rekening transfer tidak dibedakan per kamar
+
+**Pengguna:** Menanyakan mengapa setiap kamar/harga dapat memakai rekening berbeda dan menyatakan hal tersebut tidak perlu. Instruksi transfer seharusnya menampilkan seluruh rekening bank yang tersedia agar tamu dapat memilih salah satunya.
+
+**Keputusan/asisten:** Menyetujui rekening sebagai master konfigurasi global properti. Pilihan rekening di form harga kamar dihapus. Semua rekening aktif ditampilkan pada halaman sukses dan lookup booking; reservation menyimpan seluruh versi rekening sebagai snapshot. Saat bukti transfer dicatat, Front Office memilih rekening KOOKA yang benar-benar menerima dana. Availability online hanya mensyaratkan minimal satu rekening properti aktif, bukan relasi rekening pada setiap rate plan.
+
+## 4 Agustus 2026 — Waktu kedatangan dibuat fleksibel
+
+**Pengguna:** Meminta early check-in dan late check-in dibuat fleksibel tanpa batas jam karena kebijakan guesthouse masih menyesuaikan kondisi langsung di tempat dan perlu melayani tamu, termasuk tamu dari luar negeri.
+
+**Keputusan/asisten:** Jam check-in `14:00` dan checkout `12:00` tetap dipakai sebagai jadwal standar untuk informasi serta perencanaan, bukan cutoff transaksi. Early check-in dan late arrival/check-in diputuskan langsung oleh Front Office tanpa earliest/latest global selama masa booking masih berlaku, kamar assigned, dan kamar siap. Sistem tidak membuat no-show otomatis karena keterlambatan. Late checkout juga tidak memakai batas jam global, tetapi harus memperhatikan booking berikutnya; bila penggunaan masuk malam berikutnya, proses berubah menjadi extension dengan pemeriksaan inventory. Semua keputusan sensitif tetap menyimpan actor, alasan, dan audit.
+
+## 4 Agustus 2026 — Istilah folio disederhanakan pada antarmuka
+
+**Pengguna:** Meminta istilah `folio` diganti dengan bahasa yang lebih umum agar mudah dipahami staf guesthouse.
+
+**Keputusan/asisten:** Istilah teknis `folio` tetap dipertahankan pada struktur internal agar buku besar transaksi, API, audit, dan histori tidak berubah. Pada antarmuka, istilah tersebut diganti secara kontekstual menjadi `Tagihan & dokumen`, `Tagihan tamu`, `Sisa tagihan`, atau `Rincian tagihan`. Pesan error operasional juga menggunakan istilah tagihan dalam bahasa Indonesia.
+
+## 4 Agustus 2026 — Status F&B disederhanakan
+
+**Pengguna:** Meminta langkah status F&B dikurangi karena alur sebelumnya terlalu banyak, dengan usulan pesanan langsung diproses lalu selesai/disajikan.
+
+**Keputusan/asisten:** Pesanan baru langsung berstatus `Sedang diproses`. Staf cukup menekan `Tandai selesai / disajikan` setelah pesanan diserahkan, atau membatalkannya dengan alasan. Status lama tetap dikenali dan dikelompokkan ke label sederhana agar data historis serta audit tidak rusak.
+
+## 4 Agustus 2026 — Checkout sebagian pada booking multi-room
+
+**Pengguna:** Melaporkan bahwa ketika satu kamar dari booking multi-room Nana di-checkout, kamar tersebut muncul kembali sebagai belum dialokasikan. Tampilan baru benar setelah kamar kedua ikut checkout.
+
+**Keputusan/asisten:** Penyebabnya adalah line kamar yang sudah `COMPLETED` masih ikut dalam data operasional setelah assignment aktifnya dilepas. Data operasional dan pilihan kamar diperbaiki agar hanya memuat line `ACTIVE`. Checkout kamar pertama sekarang menghilangkan kamar tersebut dari antrean operasional tanpa mengganggu kamar kedua; booking utama tetap aktif sampai semua kamar selesai checkout.
+
+## 4 Agustus 2026 — Status Pantauan Kamar diperjelas secara visual
+
+**Pengguna:** Meminta kondisi kamar lebih mudah disadari karena warna sebelumnya hanya terlihat pada garis tepi dan badge yang terlalu lembut.
+
+**Keputusan/asisten:** Seluruh permukaan kartu sekarang memakai warna status yang konsisten, bukan hanya garis samping. `Siap` memakai hijau, `Terisi` jingga hangat, `Perlu dibersihkan` kuning, dan `Perlu perhatian` merah. Border, strip atas, nomor kamar, badge kontras, latar kartu, serta footer memakai tone yang sama agar status dapat dikenali cepat tanpa hanya bergantung pada teks.
+
+## 4 Agustus 2026 — Email customer hanya tiga jenis
+
+**Pengguna:** Meminta email customer dibatasi menjadi bukti pembayaran telah dicatat, pembayaran terverifikasi/booking terkonfirmasi, dan invoice. Email status pembayaran yang sebelumnya hanya berupa teks juga diminta memiliki tampilan profesional.
+
+**Keputusan/asisten:** Email booking baru/instruksi pembayaran, reminder deadline, payment rejected/voided/partial, cancellation, dan expiry dihentikan. Email bukti pembayaran serta konfirmasi memakai template HTML KOOKA responsif dengan status yang jelas, kode booking, link melihat booking, identitas properti, dan plain-text fallback. Konfirmasi hanya dikirim ketika ambang pembayaran wajib pertama kali terpenuhi sehingga pembayaran tambahan tidak menghasilkan email berulang. Email dokumen juga memakai body branded dengan PDF terlampir. Reset password staf tetap dipertahankan sebagai email keamanan internal.
+
+## 4 Agustus 2026 — Permintaan cleaning untuk kamar yang sedang dihuni
+
+**Pengguna:** Melaporkan tugas yang dibuat melalui `Tambahkan kamar untuk dibersihkan` gagal saat dimulai dengan pesan bahwa kamar yang sedang ditempati tidak dapat diubah melalui aksi cepat.
+
+**Keputusan/asisten:** Penyebabnya adalah tombol Housekeeping salah memakai jalur quick room status yang memang hanya aman untuk kamar kosong. Tugas manual diubah menjadi `GUEST_REQUEST` dan seluruh progresnya memakai transition cleaning task sehingga kamar occupied dapat dibersihkan tanpa mengubah status okupansi. Teks antarmuka diperjelas untuk menunjukkan bahwa fitur digunakan ketika tamu masih menginap, meminta pembersihan, dan sudah memberikan izin masuk.

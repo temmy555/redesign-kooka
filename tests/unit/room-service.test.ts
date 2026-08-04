@@ -64,12 +64,14 @@ describe("room service", () => {
     mocks.recordAuditEvent.mockResolvedValue(undefined);
     mocks.update.mockReturnValue(chain());
     mocks.insert.mockReturnValue(chain());
+    mocks.execute.mockResolvedValue({ rows: [] });
     mocks.withIdempotency.mockImplementation(
       async (_options: unknown, run: (tx: unknown) => Promise<unknown>) => {
         const result = (await run({
           select: mocks.select,
           insert: mocks.insert,
           update: mocks.update,
+          execute: mocks.execute,
         })) as { response: unknown };
         return result.response;
       },
@@ -92,6 +94,8 @@ describe("room service", () => {
           bookingCode: "KR-260802-ABCDEFGH",
           guestName: "Budi Santoso",
           nextArrivalAt: null,
+          nextArrivalBookingCode: "KR-260803-IJKLMNOP",
+          nextArrivalGuestName: "Sari Wijaya",
           updatedAt: new Date(),
         },
       ],
@@ -105,6 +109,8 @@ describe("room service", () => {
     expect(board.rooms[0]).toMatchObject({
       guestName: "B*** S***",
       bookingCode: "EFGH",
+      nextArrivalGuestName: "S*** W***",
+      nextArrivalBookingCode: "MNOP",
     });
   });
 
@@ -232,6 +238,48 @@ describe("room service", () => {
     ).rejects.toThrow("does not match");
   });
 
+  it("rejects a physical room with an overlapping legacy assignment", async () => {
+    mocks.select
+      .mockReturnValueOnce(
+        chain([
+          {
+            id: U1,
+            checkInDate: "2026-08-03",
+            checkoutDate: "2026-08-04",
+            reservationId: U2,
+            status: "CONFIRMED",
+          },
+        ]),
+      )
+      .mockReturnValueOnce(
+        chain([
+          {
+            id: U3,
+            reservationRoomId: U1,
+            status: "DUE_IN",
+            plannedArrivalAt: new Date("2026-08-03T07:00:00.000Z"),
+            plannedDepartureAt: new Date("2026-08-04T05:00:00.000Z"),
+          },
+        ]),
+      )
+      .mockReturnValueOnce(chain([{ id: U4, serviceability: "IN_SERVICE" }]))
+      .mockReturnValueOnce(chain([{ roomTypeId: U2 }]))
+      .mockReturnValueOnce(chain([{ roomTypeId: U2 }]))
+      .mockReturnValueOnce(chain([]));
+    mocks.execute.mockResolvedValueOnce({ rows: [{ id: U4 }] });
+
+    await expect(
+      assignRoom({
+        propertyId: U1,
+        reservationRoomId: U1,
+        roomUnitId: U4,
+        reason: "Arrival allocation",
+        idempotencyKey: "assign-overlap",
+        session,
+      }),
+    ).rejects.toThrow("another booking");
+  });
+
   it("blocks a room for maintenance and creates physical night claims", async () => {
     mocks.select.mockReturnValueOnce(chain([{ id: U2 }]));
     mocks.insert
@@ -258,6 +306,13 @@ describe("room service", () => {
   });
 
   it("moves a room without charge and dirties the vacated room", async () => {
+    const actualCheckInAt = new Date("2026-08-02T13:45:00+07:00");
+    const releaseOldAssignment = vi.fn(() => chain());
+    mocks.update
+      .mockReturnValueOnce(chain())
+      .mockReturnValueOnce(chain())
+      .mockReturnValueOnce({ ...chain(), set: releaseOldAssignment })
+      .mockReturnValue(chain());
     mocks.select
       .mockReturnValueOnce(
         chain([
@@ -266,6 +321,7 @@ describe("room service", () => {
             fromUnitId: U2,
             reservationRoomId: U3,
             status: "IN_HOUSE",
+            actualCheckInAt,
             effectiveFrom: new Date("2026-08-02T14:00:00+07:00"),
             checkoutDate: "2026-08-04",
             reservationId: U4,
@@ -300,6 +356,13 @@ describe("room service", () => {
       session,
     });
     expect(result).toMatchObject({ roomMoveId: U2, toAssignmentId: U4 });
+    expect(releaseOldAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "RELEASED",
+        effectiveFrom: actualCheckInAt,
+        effectiveTo: expect.any(Date),
+      }),
+    );
     expect(mocks.update).toHaveBeenCalled();
   });
 
@@ -366,6 +429,7 @@ describe("room service", () => {
             fromUnitId: U2,
             reservationRoomId: U3,
             status: "DUE_IN",
+            actualCheckInAt: null,
             effectiveFrom: new Date("2026-08-03T14:00:00+07:00"),
             checkoutDate: "2026-08-04",
             reservationId: U4,

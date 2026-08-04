@@ -63,11 +63,6 @@ const navigation: NavigationItem[] = [
       "audit.view",
     ],
   },
-  {
-    href: "/staff/test-guide",
-    label: "Panduan test",
-    short: "PT",
-  },
 ];
 
 export function allowedNavigation(

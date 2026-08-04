@@ -43,12 +43,8 @@ export default function FnbHistoryFilters({
         onChange={setStatus}
         options={[
           { value: "ALL", label: "Semua status" },
-          { value: "ENTERED", label: "Baru masuk" },
-          { value: "ACCEPTED", label: "Diterima" },
-          { value: "PREPARING", label: "Disiapkan" },
-          { value: "READY", label: "Siap disajikan" },
-          { value: "SERVED", label: "Disajikan" },
-          { value: "COMPLETED", label: "Selesai" },
+          { value: "IN_PROGRESS", label: "Sedang diproses" },
+          { value: "DONE", label: "Selesai / disajikan" },
           { value: "CANCELLED", label: "Dibatalkan" },
         ]}
         value={status}

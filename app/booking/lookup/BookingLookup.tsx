@@ -31,7 +31,14 @@ interface BookingDetail {
     amountIdr: number;
     receivedAt: string | null;
   }>;
-  paymentInstruction: {
+  paymentInstructions: Array<{
+    paymentInstructionVersionId?: string;
+    bankName: string;
+    accountHolder: string;
+    accountNumber: string;
+    instruction: string;
+  }>;
+  paymentInstruction?: {
     bankName: string;
     accountHolder: string;
     accountNumber: string;
@@ -210,6 +217,11 @@ export default function BookingLookup({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [booking, setBooking] = useState<BookingDetail | null>(null);
+  const paymentInstructions = booking?.paymentInstructions?.length
+    ? booking.paymentInstructions
+    : booking?.paymentInstruction
+      ? [booking.paymentInstruction]
+      : [];
 
   async function lookup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -444,17 +456,31 @@ export default function BookingLookup({
                   </a>
                 ) : null}
               </article>
-            ) : booking.paymentInstruction ? (
+            ) : paymentInstructions.length ? (
               <article className="lookup-bank">
                 <p className="eyebrow">
                   {locale === "id"
                     ? "Instruksi transfer"
                     : "Transfer instructions"}
                 </p>
-                <strong>{booking.paymentInstruction.bankName}</strong>
-                <span>{booking.paymentInstruction.accountNumber}</span>
-                <p>{booking.paymentInstruction.accountHolder}</p>
-                <small>{booking.paymentInstruction.instruction}</small>
+                <p>
+                  {locale === "id"
+                    ? "Transfer ke salah satu rekening berikut."
+                    : "Transfer to any account below."}
+                </p>
+                <div className="lookup-bank-list">
+                  {paymentInstructions.map((instruction, index) => (
+                    <div
+                      className="lookup-bank-account"
+                      key={`${instruction.bankName}-${instruction.accountNumber}-${index}`}
+                    >
+                      <strong>{instruction.bankName}</strong>
+                      <span>{instruction.accountNumber}</span>
+                      <p>{instruction.accountHolder}</p>
+                      <small>{instruction.instruction}</small>
+                    </div>
+                  ))}
+                </div>
                 {booking.whatsappUrl ? (
                   <a
                     className="button whatsapp-button"

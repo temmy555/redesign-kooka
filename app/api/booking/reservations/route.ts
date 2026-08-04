@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { createReservation } from "../../../../src/modules/booking/reservation-service";
 import { AppError, toErrorResponse } from "../../../../src/platform/errors";
+import { getLogger } from "../../../../src/platform/logger";
 import { getActivePropertyId } from "../../../../src/platform/property";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,29 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    if (!(error instanceof AppError) && !(error instanceof z.ZodError)) {
+      const cause =
+        error instanceof Error && "cause" in error ? error.cause : undefined;
+      getLogger().error(
+        {
+          errorName: error instanceof Error ? error.name : typeof error,
+          errorMessage:
+            error instanceof Error
+              ? error.message.split("\n", 1)[0]
+              : "Non-Error thrown",
+          causeName: cause instanceof Error ? cause.name : undefined,
+          causeMessage:
+            cause instanceof Error
+              ? cause.message.split("\n", 1)[0]
+              : undefined,
+          causeCode:
+            cause && typeof cause === "object" && "code" in cause
+              ? String(cause.code)
+              : undefined,
+        },
+        "Public reservation creation failed",
+      );
+    }
     const response = toErrorResponse(
       error instanceof z.ZodError
         ? new AppError("VALIDATION_ERROR", "Invalid reservation request")

@@ -90,7 +90,7 @@ describe("reservation conversion and cancellation", () => {
     );
   });
 
-  it("converts an online quote into an on-hold reservation, folio, and reminders", async () => {
+  it("converts an online quote into an on-hold reservation without extra customer emails", async () => {
     const quoteRoom = {
       id: U3,
       quoteId: U2,
@@ -153,7 +153,10 @@ describe("reservation conversion and cancellation", () => {
       .mockReturnValueOnce(
         chain([
           {
+            instructionSetId: U2,
+            setCode: "BANK-BCA",
             id: U2,
+            versionNumber: 1,
             lifecycleStatus: "ACTIVE",
             effectiveFrom: new Date("2020-01-01T00:00:00.000Z"),
             effectiveTo: null,
@@ -176,6 +179,7 @@ describe("reservation conversion and cancellation", () => {
 
     mocks.insert
       .mockReturnValueOnce(chain([{ id: U1 }]))
+      .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain([{ id: U2 }]))
       .mockReturnValueOnce(chain())
@@ -206,7 +210,11 @@ describe("reservation conversion and cancellation", () => {
         accountNumber: "123456789012",
       },
     });
-    expect(mocks.enqueueOutboxEvent).toHaveBeenCalledTimes(3);
+    expect(mocks.enqueueOutboxEvent).toHaveBeenCalledOnce();
+    expect(mocks.enqueueOutboxEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ topic: "booking.reservation-expire" }),
+      expect.anything(),
+    );
     expect(mocks.recordAuditEvent).toHaveBeenCalledOnce();
   });
 
@@ -294,6 +302,7 @@ describe("reservation conversion and cancellation", () => {
           },
         ]),
       )
+      .mockReturnValueOnce(chain([]))
       .mockReturnValueOnce(
         chain([
           {
@@ -440,7 +449,34 @@ describe("reservation conversion and cancellation", () => {
       idempotencyKey: "cancel-1",
     });
     expect(result).toEqual({ reservationId: U2, status: "CANCELLED" });
-    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(mocks.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects cancellation after a guest has checked in", async () => {
+    mocks.select.mockReturnValueOnce(
+      chain([
+        {
+          id: U2,
+          propertyId: U1,
+          status: "CONFIRMED",
+          language: "id",
+          bookingCode: "KR-260802-ABCDEFGH",
+          bookerEmailNormalized: "guest@example.com",
+        },
+      ]),
+    );
+    mocks.execute.mockResolvedValueOnce({ rows: [{ id: U3 }] });
+
+    await expect(
+      cancelReservation({
+        propertyId: U1,
+        reservationId: U2,
+        reason: "Wrong cancellation attempt",
+        session,
+        idempotencyKey: "cancel-in-house",
+      }),
+    ).rejects.toThrow("use checkout");
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it("requires a cancellation reason", async () => {

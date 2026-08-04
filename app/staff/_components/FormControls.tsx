@@ -21,7 +21,12 @@ export type SelectOption = {
 };
 
 function digitsOnly(value: string) {
-  const digits = value.replace(/\D/gu, "");
+  const trimmed = value.trim();
+  const databaseDecimal = /^\d+\.\d{1,2}$/u.test(trimmed);
+  const normalized = databaseDecimal
+    ? String(Math.trunc(Number(trimmed)))
+    : value;
+  const digits = normalized.replace(/\D/gu, "");
   return digits.replace(/^0+(?=\d)/u, "");
 }
 

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 
 import { getDatabase } from "../../db";
 import {
@@ -566,6 +566,131 @@ export async function publishCommercialVersion(params: {
     return {
       id: params.versionId,
       lifecycleStatus,
+      approvalStatus: current.approvalStatus,
+    };
+  });
+}
+
+export async function retireCommercialVersion(params: {
+  session: StaffSession;
+  propertyId: string;
+  subject: CommercialVersionSubject;
+  versionId: string;
+  reason: string;
+  now?: Date;
+}): Promise<MutationResult> {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "commercial.manage",
+  );
+  const reason = checkedReason(params.reason);
+  const current = await getOwnedVersion(
+    params.subject,
+    params.versionId,
+    params.propertyId,
+  );
+  if (!["ACTIVE", "SCHEDULED"].includes(current.lifecycleStatus)) {
+    throw new AppError(
+      "CONFLICT",
+      "Only an active or scheduled commercial version can be retired",
+    );
+  }
+  const now = params.now ?? new Date();
+  const linkedRateField =
+    params.subject === "TAX_PROFILE"
+      ? ratePlanVersions.taxProfileId
+      : params.subject === "POLICY"
+        ? ratePlanVersions.cancellationPolicySetId
+        : null;
+  if (linkedRateField) {
+    const [linkedRate] = await getDatabase()
+      .select({ name: ratePlanVersions.nameId })
+      .from(ratePlanVersions)
+      .innerJoin(ratePlans, eq(ratePlans.id, ratePlanVersions.ratePlanId))
+      .where(
+        and(
+          eq(ratePlans.propertyId, params.propertyId),
+          eq(linkedRateField, current.parentId),
+          inArray(ratePlanVersions.lifecycleStatus, ["ACTIVE", "SCHEDULED"]),
+          or(
+            isNull(ratePlanVersions.effectiveTo),
+            gt(ratePlanVersions.effectiveTo, now),
+          ),
+        ),
+      )
+      .limit(1);
+    if (linkedRate) {
+      const subjectName =
+        params.subject === "TAX_PROFILE" ? "Pengaturan pajak" : "Kebijakan";
+      throw new AppError(
+        "CONFLICT",
+        `${subjectName} masih dipakai oleh harga kamar ${linkedRate.name}. Edit harga kamar tersebut terlebih dahulu.`,
+      );
+    }
+  }
+  const update = {
+    lifecycleStatus: "RETIRED",
+    effectiveTo: current.effectiveFrom < now ? now : current.effectiveTo,
+    reason,
+    updatedAt: now,
+    updatedByUserId: params.session.user.id,
+  };
+
+  return getDatabase().transaction(async (tx) => {
+    switch (params.subject) {
+      case "TAX_PROFILE":
+        await tx
+          .update(taxProfileVersions)
+          .set(update)
+          .where(eq(taxProfileVersions.id, params.versionId));
+        break;
+      case "POLICY":
+        await tx
+          .update(policyVersions)
+          .set(update)
+          .where(eq(policyVersions.id, params.versionId));
+        break;
+      case "PAYMENT_INSTRUCTION":
+        await tx
+          .update(paymentInstructionVersions)
+          .set(update)
+          .where(eq(paymentInstructionVersions.id, params.versionId));
+        break;
+      case "DOCUMENT_PROFILE":
+        await tx
+          .update(documentProfileVersions)
+          .set(update)
+          .where(eq(documentProfileVersions.id, params.versionId));
+        break;
+      case "RATE_PLAN":
+        await tx
+          .update(ratePlanVersions)
+          .set(update)
+          .where(eq(ratePlanVersions.id, params.versionId));
+        break;
+    }
+    await recordAuditEvent(
+      {
+        propertyId: params.propertyId,
+        actorUserId: params.session.user.id,
+        actorType: "user",
+        action: `commercial.${params.subject.toLowerCase()}.retire`,
+        targetType: params.subject.toLowerCase(),
+        targetId: params.versionId,
+        before: { lifecycleStatus: current.lifecycleStatus },
+        after: {
+          lifecycleStatus: "RETIRED",
+          effectiveTo: update.effectiveTo?.toISOString() ?? null,
+        },
+        reason,
+        result: "SUCCESS",
+      },
+      tx,
+    );
+    return {
+      id: params.versionId,
+      lifecycleStatus: "RETIRED",
       approvalStatus: current.approvalStatus,
     };
   });

@@ -161,9 +161,11 @@ describe("Step 22A staff server pages", () => {
     mocks.getActivePermissionCodes.mockResolvedValue(
       new Set(["booking.manage", "payment.manage", "stay.manage"]),
     );
-    expect(renderToStaticMarkup(await FrontOfficePage())).toContain(
-      "Booking manual / multi-room",
-    );
+    expect(
+      renderToStaticMarkup(
+        await FrontOfficePage({ searchParams: Promise.resolve({}) }),
+      ),
+    ).toContain("Booking manual / multi-room");
 
     mocks.getActivePermissionCodes.mockResolvedValue(
       new Set(["configuration.view", "room_master.view"]),
@@ -171,9 +173,11 @@ describe("Step 22A staff server pages", () => {
     expect(renderToStaticMarkup(await AdminPage())).toContain("Pengaturan");
 
     mocks.getActivePermissionCodes.mockResolvedValue(new Set());
-    expect(renderToStaticMarkup(await FrontOfficePage())).toContain(
-      "Akses dibatasi",
-    );
+    expect(
+      renderToStaticMarkup(
+        await FrontOfficePage({ searchParams: Promise.resolve({}) }),
+      ),
+    ).toContain("Akses dibatasi");
     expect(renderToStaticMarkup(await AdminPage())).toContain("Akses dibatasi");
   });
 
@@ -270,7 +274,7 @@ describe("Step 22A staff server pages", () => {
     );
   });
 
-  it("renders every active F&B state and denies unrelated roles", async () => {
+  it("renders legacy F&B states with simple operational labels and denies unrelated roles", async () => {
     mocks.getActivePermissionCodes.mockResolvedValue(
       new Set(["fnb.order.manage"]),
     );
@@ -337,6 +341,9 @@ describe("Step 22A staff server pages", () => {
     expect(html).toContain("Total tagihan");
     expect(html).toContain("Print invoice F&amp;B");
     expect(html).toContain("FRC-001");
+    expect(html).toContain("Sedang diproses");
+    expect(html).toContain("Selesai / disajikan");
+    expect(html).toContain("Dibatalkan");
 
     mocks.getActivePermissionCodes.mockResolvedValue(new Set());
     expect(renderToStaticMarkup(await FnbPage())).toContain("Akses dibatasi");

@@ -32,6 +32,16 @@ function key(action: string) {
   return `${action}:${crypto.randomUUID()}`;
 }
 
+function internalCode(prefix: string) {
+  const normalized = prefix
+    .normalize("NFKD")
+    .replace(/[^a-zA-Z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .toUpperCase()
+    .slice(0, 24);
+  return `${normalized || "ITEM"}-${crypto.randomUUID().toUpperCase()}`;
+}
+
 function messageFrom(value: unknown) {
   if (
     value &&
@@ -61,6 +71,52 @@ async function post(endpoint: string, body: JsonRecord, method = "POST") {
 
 function human(value: string) {
   return value.replaceAll("_", " ").toLocaleLowerCase("id-ID");
+}
+
+function latestBy(items: JsonRecord[], parentKey: string) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const parentId = String(item[parentKey] ?? "");
+    if (!parentId || seen.has(parentId)) return false;
+    seen.add(parentId);
+    return true;
+  });
+}
+
+function activeVersion(item: JsonRecord) {
+  return ["ACTIVE", "SCHEDULED"].includes(String(item.lifecycleStatus));
+}
+
+function percent(value: unknown) {
+  return `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(Number(value ?? 0) * 100)}%`;
+}
+
+function dateLabel(value: unknown) {
+  const date = new Date(String(value ?? ""));
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("id-ID", {
+    timeZone: "Asia/Jakarta",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function idr(value: unknown) {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(Number(value ?? 0));
+}
+
+function scrollToForm(id: string) {
+  window.setTimeout(() => {
+    document.getElementById(id)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, 0);
 }
 
 export default function AdminWorkspace({
@@ -268,7 +324,14 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
       {
         code: "STAY_TIMING",
         name: "Jam check-in dan checkout",
-        values: { checkInTime, checkoutTime },
+        values: {
+          checkInTime,
+          checkoutTime,
+          arrivalHandling: "FLEXIBLE_FRONT_OFFICE",
+          enforceEarlyCheckInCutoff: false,
+          enforceLateArrivalCutoff: false,
+          automaticNoShowFromTime: false,
+        },
       },
       {
         code: "BOOKING_PAYMENT",
@@ -391,9 +454,16 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
           <h2>Jam & aturan operasional</h2>
         </div>
         <form className={styles.staffForm} onSubmit={saveOperationalSettings}>
+          <p className={styles.formHint}>
+            Jam di bawah adalah jadwal standar untuk informasi tamu dan
+            perencanaan operasional, bukan batas kedatangan. Early check-in dan
+            kedatangan terlambat diputuskan Front Office langsung di lokasi
+            tanpa cutoff otomatis, selama kamar siap dan masa menginap masih
+            berlaku.
+          </p>
           <div className={styles.formGrid}>
             <label>
-              Jam check-in
+              Jadwal check-in standar
               <input
                 onChange={(event) => setCheckInTime(event.target.value)}
                 required
@@ -402,7 +472,7 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
               />
             </label>
             <label>
-              Jam checkout
+              Jadwal checkout standar
               <input
                 onChange={(event) => setCheckoutTime(event.target.value)}
                 required
@@ -1329,6 +1399,24 @@ function CommercialAdmin({
   const exchange = Array.isArray(data.exchangeRates)
     ? (data.exchangeRates as JsonRecord[])
     : [];
+  const policies = Array.isArray(data.policies)
+    ? (data.policies as JsonRecord[])
+    : [];
+  const instructions = Array.isArray(data.paymentInstructions)
+    ? (data.paymentInstructions as JsonRecord[])
+    : [];
+  const rateRules = Array.isArray(data.rateRules)
+    ? (data.rateRules as JsonRecord[])
+    : [];
+  const latestTaxes = latestBy(taxes, "profileId");
+  const latestRates = latestBy(rates, "ratePlanId");
+  const latestPolicies = latestBy(policies, "policySetId");
+  const latestInstructions = latestBy(instructions, "instructionSetId");
+  const latestExchange = latestBy(exchange, "quoteCurrency");
+  const activeTaxes = latestTaxes.filter(activeVersion);
+  const activeRates = latestRates.filter(activeVersion);
+  const activePolicies = latestPolicies.filter(activeVersion);
+  const activeInstructions = latestInstructions.filter(activeVersion);
   const roomTypes = Array.isArray(roomData.roomTypes)
     ? (roomData.roomTypes as JsonRecord[]).filter(
         (item, index, list) =>
@@ -1337,21 +1425,23 @@ function CommercialAdmin({
             index,
       )
     : [];
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
+  const lodgingTaxes = activeTaxes.filter((item) => item.domain === "LODGING");
   const [domain, setDomain] = useState("LODGING");
   const [taxRate, setTaxRate] = useState("0");
   const [serviceRate, setServiceRate] = useState("0");
-  const [noTax, setNoTax] = useState(false);
+  const [noTax, setNoTax] = useState(true);
   const [reason, setReason] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [displayRate, setDisplayRate] = useState("");
-  const [planCode, setPlanCode] = useState("");
-  const [planNameId, setPlanNameId] = useState("");
-  const [planNameEn, setPlanNameEn] = useState("");
+  const [planNameId, setPlanNameId] = useState("Harga Standar");
+  const [planNameEn, setPlanNameEn] = useState("Standard Rate");
   const [planRoomTypeId, setPlanRoomTypeId] = useState("");
   const [nightlyRate, setNightlyRate] = useState("");
   const [minimumStay, setMinimumStay] = useState("1");
+  const [selectedTaxProfileId, setSelectedTaxProfileId] = useState("");
+  const [selectedCancellationPolicySetId, setSelectedCancellationPolicySetId] =
+    useState("");
+  const [showRateOptions, setShowRateOptions] = useState(false);
   const [rateStartsOn, setRateStartsOn] = useState(() =>
     new Date().toISOString().slice(0, 10),
   );
@@ -1361,49 +1451,72 @@ function CommercialAdmin({
     return date.toISOString().slice(0, 10);
   });
   const [rateReason, setRateReason] = useState("");
-  const [bankCode, setBankCode] = useState("");
   const [bankName, setBankName] = useState("");
   const [accountHolder, setAccountHolder] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [bankReason, setBankReason] = useState("");
-  const [policyCode, setPolicyCode] = useState("");
   const [policyTitleId, setPolicyTitleId] = useState("");
   const [policyTitleEn, setPolicyTitleEn] = useState("");
   const [policyContentId, setPolicyContentId] = useState("");
   const [policyContentEn, setPolicyContentEn] = useState("");
   const [policyReason, setPolicyReason] = useState("");
+  const [editingTaxProfileId, setEditingTaxProfileId] = useState("");
+  const [editingRatePlanId, setEditingRatePlanId] = useState("");
+  const [editingInstructionSetId, setEditingInstructionSetId] = useState("");
+  const [editingPolicySetId, setEditingPolicySetId] = useState("");
+  const [retireTarget, setRetireTarget] = useState<{
+    subject: "TAX_PROFILE" | "RATE_PLAN" | "PAYMENT_INSTRUCTION" | "POLICY";
+    versionId: string;
+    label: string;
+  } | null>(null);
+  const [retireReason, setRetireReason] = useState("");
   async function createTax(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const domainName =
+        domain === "LODGING"
+          ? "Kamar"
+          : domain === "FNB"
+            ? "F&B"
+            : "Layanan / tour";
+      const auditReason =
+        reason.trim() || `Pengaturan pajak ${domainName} dibuat oleh Owner`;
       const draft = await post("/api/staff/admin/commercial-master", {
         action: "CREATE_TAX_DRAFT",
-        code,
-        name,
+        profileId: editingTaxProfileId || undefined,
+        code: internalCode(`TAX-${domain}`),
+        name: noTax ? `Tanpa pajak — ${domainName}` : `Pajak — ${domainName}`,
         domain,
-        taxRate: noTax ? "0" : taxRate,
-        serviceChargeRate: noTax ? "0" : serviceRate,
+        taxRate: noTax ? "0" : String(Number(taxRate) / 100),
+        serviceChargeRate: noTax ? "0" : String(Number(serviceRate) / 100),
         taxInclusive: false,
         serviceChargeInclusive: false,
         noTax,
         effectiveFrom: new Date().toISOString(),
-        reason,
+        reason: auditReason,
       });
       await post("/api/staff/admin/commercial-master", {
         action: "REVIEW_VERSION",
         subject: "TAX_PROFILE",
         versionId: String(draft.id),
         decision: "APPROVE",
-        reason,
+        reason: auditReason,
       });
       await post("/api/staff/admin/commercial-master", {
         action: "PUBLISH_VERSION",
         subject: "TAX_PROFILE",
         versionId: String(draft.id),
-        reason,
+        reason: auditReason,
       });
+      setTaxRate("0");
+      setServiceRate("0");
+      setReason("");
+      setEditingTaxProfileId("");
       setNotice({
         tone: "success",
-        message: "Konfigurasi pajak dibuat, disetujui, dan diaktifkan.",
+        message: editingTaxProfileId
+          ? "Pengaturan pajak diperbarui dan versi barunya sudah aktif."
+          : "Konfigurasi pajak dibuat, disetujui, dan diaktifkan.",
       });
       await load();
     } catch (error) {
@@ -1417,16 +1530,30 @@ function CommercialAdmin({
   async function createRatePlan(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const selectedRoomType = roomTypes.find(
+        (item) => String(item.roomTypeId) === planRoomTypeId,
+      );
+      const auditReason =
+        rateReason.trim() ||
+        `Harga kamar ${String(selectedRoomType?.nameId ?? "dipilih")} dibuat oleh Owner`;
       const draft = await post("/api/staff/admin/commercial-master", {
         action: "CREATE_RATE_PLAN_DRAFT",
-        code: planCode,
+        ratePlanId: editingRatePlanId || undefined,
+        code: internalCode(
+          `RATE-${String(selectedRoomType?.code ?? planNameId)}`,
+        ),
         nameId: planNameId,
         nameEn: planNameEn,
         sourceEligibility: "ALL",
-        effectiveFrom: new Date(`${rateStartsOn}T00:00:00+07:00`).toISOString(),
+        taxProfileId: selectedTaxProfileId || null,
+        paymentInstructionSetId: null,
+        cancellationPolicySetId: selectedCancellationPolicySetId || null,
+        effectiveFrom: editingRatePlanId
+          ? new Date().toISOString()
+          : new Date(`${rateStartsOn}T00:00:00+07:00`).toISOString(),
         effectiveTo: null,
         requiresApproval: false,
-        reason: rateReason,
+        reason: auditReason,
         rules: [
           {
             roomTypeId: planRoomTypeId,
@@ -1447,18 +1574,21 @@ function CommercialAdmin({
         action: "PUBLISH_VERSION",
         subject: "RATE_PLAN",
         versionId: String(draft.id),
-        reason: rateReason,
+        reason: auditReason,
       });
-      setPlanCode("");
-      setPlanNameId("");
-      setPlanNameEn("");
+      setPlanNameId("Harga Standar");
+      setPlanNameEn("Standard Rate");
       setPlanRoomTypeId("");
+      setSelectedTaxProfileId("");
+      setSelectedCancellationPolicySetId("");
       setNightlyRate("");
       setRateReason("");
+      setEditingRatePlanId("");
       setNotice({
         tone: "success",
-        message:
-          "Rate plan dibuat dan langsung aktif untuk tipe kamar terpilih.",
+        message: editingRatePlanId
+          ? "Harga kamar diperbarui dan versi barunya sudah aktif."
+          : "Harga kamar dibuat dan langsung aktif untuk tipe kamar terpilih.",
       });
       await load();
     } catch (error) {
@@ -1472,17 +1602,22 @@ function CommercialAdmin({
   async function createRate(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const idrPerCurrency = Number(displayRate);
+      if (!Number.isFinite(idrPerCurrency) || idrPerCurrency <= 0) {
+        throw new Error(`Masukkan nilai 1 ${currency} dalam rupiah.`);
+      }
       const now = new Date();
       const expires = new Date(now.getTime() + 86_400_000);
       await post("/api/staff/admin/commercial-master", {
         action: "CREATE_EXCHANGE_RATE",
         quoteCurrency: currency,
-        rate: displayRate,
+        rate: (1 / idrPerCurrency).toFixed(12),
         source: "Owner preference",
         asOfAt: now.toISOString(),
         expiresAt: expires.toISOString(),
-        reason,
+        reason: `Kurs tampilan ${currency} diperbarui oleh Owner`,
       });
+      setDisplayRate("");
       setNotice({
         tone: "success",
         message: `Preferensi tampilan ${currency} diperbarui; transaksi tetap IDR.`,
@@ -1498,9 +1633,12 @@ function CommercialAdmin({
   async function createPaymentInstruction(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        bankReason.trim() || "Rekening transfer dibuat oleh Owner";
       const draft = await post("/api/staff/admin/commercial-master", {
         action: "CREATE_PAYMENT_INSTRUCTION_DRAFT",
-        code: bankCode,
+        instructionSetId: editingInstructionSetId || undefined,
+        code: internalCode(`BANK-${bankName}`),
         name: `${bankName} — ${accountHolder}`,
         bankName,
         accountHolder,
@@ -1508,29 +1646,31 @@ function CommercialAdmin({
         instructionId: `Transfer ke ${bankName} atas nama ${accountHolder}. Cantumkan kode booking pada bukti transfer.`,
         instructionEn: `Transfer to ${bankName} under ${accountHolder}. Include the booking code in the transfer receipt.`,
         effectiveFrom: new Date().toISOString(),
-        reason: bankReason,
+        reason: auditReason,
       });
       await post("/api/staff/admin/commercial-master", {
         action: "REVIEW_VERSION",
         subject: "PAYMENT_INSTRUCTION",
         versionId: String(draft.id),
         decision: "APPROVE",
-        reason: bankReason,
+        reason: auditReason,
       });
       await post("/api/staff/admin/commercial-master", {
         action: "PUBLISH_VERSION",
         subject: "PAYMENT_INSTRUCTION",
         versionId: String(draft.id),
-        reason: bankReason,
+        reason: auditReason,
       });
-      setBankCode("");
       setBankName("");
       setAccountHolder("");
       setAccountNumber("");
       setBankReason("");
+      setEditingInstructionSetId("");
       setNotice({
         tone: "success",
-        message: "Instruksi transfer dibuat dan diaktifkan.",
+        message: editingInstructionSetId
+          ? "Rekening transfer diperbarui dan versi barunya sudah aktif."
+          : "Instruksi transfer dibuat dan diaktifkan.",
       });
       await load();
     } catch (error) {
@@ -1546,39 +1686,45 @@ function CommercialAdmin({
   async function createPolicy(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        policyReason.trim() ||
+        "Kebijakan pembatalan dan refund dibuat oleh Owner";
       const draft = await post("/api/staff/admin/commercial-master", {
         action: "CREATE_POLICY_DRAFT",
-        code: policyCode,
+        policySetId: editingPolicySetId || undefined,
+        code: internalCode("CANCELLATION-REFUND"),
         policyType: "CANCELLATION_REFUND",
         titleId: policyTitleId,
         titleEn: policyTitleEn,
         contentId: policyContentId,
         contentEn: policyContentEn,
         effectiveFrom: new Date().toISOString(),
-        reason: policyReason,
+        reason: auditReason,
       });
       await post("/api/staff/admin/commercial-master", {
         action: "REVIEW_VERSION",
         subject: "POLICY",
         versionId: String(draft.id),
         decision: "APPROVE",
-        reason: policyReason,
+        reason: auditReason,
       });
       await post("/api/staff/admin/commercial-master", {
         action: "PUBLISH_VERSION",
         subject: "POLICY",
         versionId: String(draft.id),
-        reason: policyReason,
+        reason: auditReason,
       });
-      setPolicyCode("");
       setPolicyTitleId("");
       setPolicyTitleEn("");
       setPolicyContentId("");
       setPolicyContentEn("");
       setPolicyReason("");
+      setEditingPolicySetId("");
       setNotice({
         tone: "success",
-        message: "Kebijakan pembatalan/refund dibuat dan diaktifkan.",
+        message: editingPolicySetId
+          ? "Kebijakan diperbarui dan versi barunya sudah aktif."
+          : "Kebijakan pembatalan/refund dibuat dan diaktifkan.",
       });
       await load();
     } catch (error) {
@@ -1589,34 +1735,135 @@ function CommercialAdmin({
       });
     }
   }
+
+  function editTax(item: JsonRecord) {
+    setEditingTaxProfileId(String(item.profileId));
+    setDomain(String(item.domain ?? "LODGING"));
+    setNoTax(Boolean(item.noTax));
+    setTaxRate(String(Number(item.taxRate ?? 0) * 100));
+    setServiceRate(String(Number(item.serviceChargeRate ?? 0) * 100));
+    setReason("");
+    scrollToForm("tax-settings-form");
+  }
+
+  function editRatePlan(item: JsonRecord) {
+    const rule = rateRules.find(
+      (candidate) =>
+        String(candidate.ratePlanVersionId) === String(item.versionId),
+    );
+    setEditingRatePlanId(String(item.ratePlanId));
+    setPlanNameId(String(item.nameId ?? "Harga Standar"));
+    setPlanNameEn(String(item.nameEn ?? "Standard Rate"));
+    setPlanRoomTypeId(String(rule?.roomTypeId ?? ""));
+    setNightlyRate(
+      rule?.nightlyRateIdr === null || rule?.nightlyRateIdr === undefined
+        ? ""
+        : String(Math.trunc(Number(rule.nightlyRateIdr))),
+    );
+    setMinimumStay(String(rule?.minimumStay ?? 1));
+    setRateStartsOn(String(rule?.startsOn ?? rateStartsOn).slice(0, 10));
+    setRateEndsOn(String(rule?.endsOn ?? rateEndsOn).slice(0, 10));
+    setSelectedTaxProfileId(String(item.taxProfileId ?? ""));
+    setSelectedCancellationPolicySetId(
+      String(item.cancellationPolicySetId ?? ""),
+    );
+    setShowRateOptions(true);
+    setRateReason("");
+    scrollToForm("rate-settings-form");
+  }
+
+  function editPaymentInstruction(item: JsonRecord) {
+    setEditingInstructionSetId(String(item.instructionSetId));
+    setBankName(String(item.bankName ?? ""));
+    setAccountHolder(String(item.accountHolder ?? ""));
+    setAccountNumber("");
+    setBankReason("");
+    scrollToForm("bank-settings-form");
+  }
+
+  function editPolicy(item: JsonRecord) {
+    setEditingPolicySetId(String(item.policySetId));
+    setPolicyTitleId(String(item.titleId ?? ""));
+    setPolicyTitleEn(String(item.titleEn ?? ""));
+    setPolicyContentId(String(item.contentId ?? ""));
+    setPolicyContentEn(String(item.contentEn ?? ""));
+    setPolicyReason("");
+    scrollToForm("policy-settings-form");
+  }
+
+  async function retireVersion() {
+    if (!retireTarget) return;
+    try {
+      await post("/api/staff/admin/commercial-master", {
+        action: "RETIRE_VERSION",
+        subject: retireTarget.subject,
+        versionId: retireTarget.versionId,
+        reason: retireReason,
+      });
+      setNotice({
+        tone: "success",
+        message: `${retireTarget.label} telah dinonaktifkan. Riwayat lama tetap tersimpan.`,
+      });
+      setRetireTarget(null);
+      setRetireReason("");
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Pengaturan belum dapat dinonaktifkan.",
+      });
+    }
+  }
+
+  function statusLabel(item: JsonRecord) {
+    return item.lifecycleStatus === "SCHEDULED" ? "Dijadwalkan" : "Aktif";
+  }
+
+  function rateRuleFor(item: JsonRecord) {
+    return rateRules.find(
+      (rule) => String(rule.ratePlanVersionId) === String(item.versionId),
+    );
+  }
+
+  function roomTypeName(roomTypeId: unknown) {
+    const roomType = roomTypes.find(
+      (item) => String(item.roomTypeId) === String(roomTypeId ?? ""),
+    );
+    return String(roomType?.nameId ?? "Semua jenis kamar");
+  }
+
   return (
     <div className={styles.actionGrid}>
-      <section className={styles.formCard}>
+      <section className={styles.formCard} id="tax-settings-form">
         <div className={styles.panelHeader}>
-          <h2>Konfigurasi pajak fleksibel</h2>
+          <h2>
+            {editingTaxProfileId
+              ? "Edit pajak & biaya layanan"
+              : "Pajak & biaya layanan"}
+          </h2>
+          {editingTaxProfileId ? (
+            <button
+              className={styles.textButton}
+              onClick={() => setEditingTaxProfileId("")}
+              type="button"
+            >
+              Batalkan edit
+            </button>
+          ) : null}
         </div>
         <form className={styles.staffForm} onSubmit={createTax}>
+          <p className={styles.formHint}>
+            Pilih penerapannya, lalu tentukan apakah transaksi menggunakan
+            pajak. Informasi pencatatan lainnya dibuat otomatis.
+          </p>
           <div className={styles.formGrid}>
             <label>
-              Kode
-              <input
-                required
-                value={code}
-                onChange={(event) => setCode(event.target.value.toUpperCase())}
-              />
-            </label>
-            <label>
-              Nama
-              <input
-                required
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-            <label>
-              Domain
+              Diterapkan untuk
               <KookaSelect
-                ariaLabel="Domain pajak"
+                ariaLabel="Penerapan pajak"
                 value={domain}
                 onChange={setDomain}
                 options={[
@@ -1627,64 +1874,80 @@ function CommercialAdmin({
               />
             </label>
             <label>
-              Tax rate
-              <input
-                disabled={noTax}
-                min="0"
-                step="0.01"
-                type="number"
-                value={taxRate}
-                onChange={(event) => setTaxRate(event.target.value)}
+              Perlakuan pajak
+              <KookaSelect
+                ariaLabel="Perlakuan pajak"
+                value={noTax ? "NO_TAX" : "WITH_TAX"}
+                onChange={(value) => setNoTax(value === "NO_TAX")}
+                options={[
+                  { value: "NO_TAX", label: "Tanpa pajak" },
+                  { value: "WITH_TAX", label: "Gunakan pajak" },
+                ]}
               />
             </label>
-            <label>
-              Service charge
-              <input
-                disabled={noTax}
-                min="0"
-                step="0.01"
-                type="number"
-                value={serviceRate}
-                onChange={(event) => setServiceRate(event.target.value)}
-              />
-            </label>
-            <label className={styles.checkboxLabel}>
-              <input
-                checked={noTax}
-                type="checkbox"
-                onChange={(event) => setNoTax(event.target.checked)}
-              />{" "}
-              Tanpa tax
-            </label>
+            {!noTax ? (
+              <>
+                <label>
+                  Pajak (%)
+                  <input
+                    max="100"
+                    min="0"
+                    required
+                    step="0.01"
+                    type="number"
+                    value={taxRate}
+                    onChange={(event) => setTaxRate(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Biaya layanan (%)
+                  <input
+                    max="100"
+                    min="0"
+                    required
+                    step="0.01"
+                    type="number"
+                    value={serviceRate}
+                    onChange={(event) => setServiceRate(event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
           </div>
           <label>
-            Alasan
+            Catatan internal (opsional)
             <textarea
-              required
-              minLength={3}
+              placeholder="Contoh: konfigurasi awal kamar"
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />
           </label>
-          <button className={styles.primaryButton}>Buat draft tax</button>
+          <button className={styles.primaryButton}>
+            {editingTaxProfileId
+              ? "Simpan perubahan pajak"
+              : "Simpan pengaturan pajak"}
+          </button>
         </form>
       </section>
-      <section className={styles.formCard}>
+      <section className={styles.formCard} id="bank-settings-form">
         <div className={styles.panelHeader}>
-          <h2>Instruksi transfer bank</h2>
+          <h2>
+            {editingInstructionSetId
+              ? "Edit rekening transfer"
+              : "Instruksi transfer bank"}
+          </h2>
+          {editingInstructionSetId ? (
+            <button
+              className={styles.textButton}
+              onClick={() => setEditingInstructionSetId("")}
+              type="button"
+            >
+              Batalkan edit
+            </button>
+          ) : null}
         </div>
         <form className={styles.staffForm} onSubmit={createPaymentInstruction}>
           <div className={styles.formGrid}>
-            <label>
-              Kode
-              <input
-                onChange={(event) =>
-                  setBankCode(event.target.value.toUpperCase())
-                }
-                required
-                value={bankCode}
-              />
-            </label>
             <label>
               Nama bank
               <input
@@ -1711,38 +1974,50 @@ function CommercialAdmin({
                 required
                 value={accountNumber}
               />
+              {editingInstructionSetId ? (
+                <small>
+                  Masukkan kembali nomor rekening lengkap untuk keamanan.
+                </small>
+              ) : null}
             </label>
           </div>
           <label>
-            Alasan
+            Catatan internal (opsional)
             <textarea
-              minLength={3}
+              placeholder="Contoh: rekening utama reservasi"
               onChange={(event) => setBankReason(event.target.value)}
-              required
               value={bankReason}
             />
           </label>
           <button className={styles.primaryButton}>
-            Simpan &amp; aktifkan rekening
+            {editingInstructionSetId
+              ? "Simpan perubahan rekening"
+              : "Simpan & aktifkan rekening"}
           </button>
         </form>
       </section>
-      <section className={`${styles.formCard} ${styles.actionGridWide}`}>
+      <section
+        className={`${styles.formCard} ${styles.actionGridWide}`}
+        id="policy-settings-form"
+      >
         <div className={styles.panelHeader}>
-          <h2>Kebijakan pembatalan &amp; refund</h2>
+          <h2>
+            {editingPolicySetId
+              ? "Edit kebijakan pembatalan & refund"
+              : "Kebijakan pembatalan & refund"}
+          </h2>
+          {editingPolicySetId ? (
+            <button
+              className={styles.textButton}
+              onClick={() => setEditingPolicySetId("")}
+              type="button"
+            >
+              Batalkan edit
+            </button>
+          ) : null}
         </div>
         <form className={styles.staffForm} onSubmit={createPolicy}>
           <div className={styles.formGrid}>
-            <label>
-              Kode
-              <input
-                onChange={(event) =>
-                  setPolicyCode(event.target.value.toUpperCase())
-                }
-                required
-                value={policyCode}
-              />
-            </label>
             <label>
               Judul Indonesia
               <input
@@ -1779,51 +2054,57 @@ function CommercialAdmin({
             </label>
           </div>
           <label>
-            Alasan
+            Catatan internal (opsional)
             <textarea
-              minLength={3}
+              placeholder="Contoh: kebijakan awal properti"
               onChange={(event) => setPolicyReason(event.target.value)}
-              required
               value={policyReason}
             />
           </label>
           <button className={styles.primaryButton}>
-            Simpan &amp; aktifkan kebijakan
+            {editingPolicySetId
+              ? "Simpan perubahan kebijakan"
+              : "Simpan & aktifkan kebijakan"}
           </button>
         </form>
       </section>
-      <section className={`${styles.formCard} ${styles.actionGridWide}`}>
+      <section
+        className={`${styles.formCard} ${styles.actionGridWide}`}
+        id="rate-settings-form"
+      >
         <div className={styles.panelHeader}>
-          <h2>Tambah rate plan</h2>
+          <h2>{editingRatePlanId ? "Edit harga kamar" : "Harga kamar"}</h2>
+          {editingRatePlanId ? (
+            <button
+              className={styles.textButton}
+              onClick={() => setEditingRatePlanId("")}
+              type="button"
+            >
+              Batalkan edit
+            </button>
+          ) : null}
         </div>
         <form className={styles.staffForm} onSubmit={createRatePlan}>
+          <p className={styles.formHint}>
+            Tentukan harga per malam untuk satu jenis kamar. Pengaturan dasar
+            lainnya sudah disiapkan otomatis.
+          </p>
           <div className={styles.formGrid}>
             <label>
-              Kode rate plan
-              <input
-                onChange={(event) =>
-                  setPlanCode(event.target.value.toUpperCase())
-                }
-                required
-                value={planCode}
-              />
-            </label>
-            <label>
-              Tipe kamar
+              Jenis kamar
               <KookaSelect
                 ariaLabel="Tipe kamar rate plan"
                 onChange={setPlanRoomTypeId}
                 options={roomTypes.map((item) => ({
                   value: String(item.roomTypeId),
                   label: String(item.nameId ?? item.code),
-                  description: String(item.code),
                 }))}
                 placeholder="Pilih tipe kamar"
                 value={planRoomTypeId}
               />
             </label>
             <label>
-              Nama Indonesia
+              Nama harga (Indonesia)
               <input
                 onChange={(event) => setPlanNameId(event.target.value)}
                 required
@@ -1831,7 +2112,7 @@ function CommercialAdmin({
               />
             </label>
             <label>
-              Nama English
+              Nama harga (English)
               <input
                 onChange={(event) => setPlanNameEn(event.target.value)}
                 required
@@ -1839,7 +2120,7 @@ function CommercialAdmin({
               />
             </label>
             <label>
-              Harga kamar / malam
+              Harga per malam (IDR)
               <MoneyInput
                 ariaLabel="Harga kamar per malam"
                 onChange={setNightlyRate}
@@ -1847,56 +2128,109 @@ function CommercialAdmin({
                 value={nightlyRate}
               />
             </label>
+          </div>
+          <div className={styles.formGrid}>
             <label>
-              Minimum menginap
-              <input
-                min="1"
-                onChange={(event) => setMinimumStay(event.target.value)}
-                required
-                type="number"
-                value={minimumStay}
-              />
-            </label>
-            <label>
-              Berlaku mulai
-              <DateField
-                ariaLabel="Tanggal mulai rate"
-                onChange={setRateStartsOn}
-                value={rateStartsOn}
-              />
-            </label>
-            <label>
-              Berlaku sampai
-              <DateField
-                ariaLabel="Tanggal akhir rate"
-                min={rateStartsOn}
-                onChange={setRateEndsOn}
-                value={rateEndsOn}
+              Kebijakan pembatalan (opsional)
+              <KookaSelect
+                ariaLabel="Kebijakan pembatalan harga kamar"
+                onChange={setSelectedCancellationPolicySetId}
+                options={[
+                  { value: "", label: "Tidak dipilih" },
+                  ...activePolicies.map((item) => ({
+                    value: String(item.policySetId),
+                    label: String(item.titleId ?? "Kebijakan pembatalan"),
+                  })),
+                ]}
+                value={selectedCancellationPolicySetId}
               />
             </label>
           </div>
+          <p className={styles.formHint}>
+            Semua rekening transfer yang aktif berlaku untuk seluruh harga kamar
+            dan akan ditampilkan kepada tamu setelah booking online.
+          </p>
+          <button
+            className={styles.secondaryButton}
+            onClick={() => setShowRateOptions((current) => !current)}
+            type="button"
+          >
+            {showRateOptions
+              ? "Sembunyikan pengaturan tambahan"
+              : "Tampilkan pengaturan tambahan"}
+          </button>
+          {showRateOptions ? (
+            <div className={styles.formGrid}>
+              <label>
+                Pajak untuk harga ini
+                <KookaSelect
+                  ariaLabel="Pajak untuk harga kamar"
+                  onChange={setSelectedTaxProfileId}
+                  options={[
+                    { value: "", label: "Tanpa pajak" },
+                    ...lodgingTaxes.map((item) => ({
+                      value: String(item.profileId),
+                      label: String(item.name ?? "Pengaturan pajak kamar"),
+                      description: item.noTax
+                        ? "Tanpa pajak"
+                        : `Pajak ${Number(item.taxRate ?? 0) * 100}% · layanan ${Number(item.serviceChargeRate ?? 0) * 100}%`,
+                    })),
+                  ]}
+                  value={selectedTaxProfileId}
+                />
+              </label>
+              <label>
+                Minimum menginap (malam)
+                <input
+                  min="1"
+                  onChange={(event) => setMinimumStay(event.target.value)}
+                  required
+                  type="number"
+                  value={minimumStay}
+                />
+              </label>
+              <label>
+                Berlaku mulai
+                <DateField
+                  ariaLabel="Tanggal mulai harga"
+                  onChange={setRateStartsOn}
+                  value={rateStartsOn}
+                />
+              </label>
+              <label>
+                Berlaku sampai
+                <DateField
+                  ariaLabel="Tanggal akhir harga"
+                  min={rateStartsOn}
+                  onChange={setRateEndsOn}
+                  value={rateEndsOn}
+                />
+              </label>
+            </div>
+          ) : null}
           <label>
-            Alasan
+            Catatan internal (opsional)
             <textarea
-              minLength={3}
+              placeholder="Contoh: harga standar pembukaan"
               onChange={(event) => setRateReason(event.target.value)}
-              required
               value={rateReason}
             />
           </label>
           <button className={styles.primaryButton}>
-            Tambah &amp; aktifkan rate plan
+            {editingRatePlanId
+              ? "Simpan perubahan harga"
+              : "Simpan & aktifkan harga"}
           </button>
         </form>
       </section>
-      <section className={styles.formCard}>
+      <section className={styles.formCard} id="currency-settings-form">
         <div className={styles.panelHeader}>
-          <h2>Kurs tampilan preferensi</h2>
+          <h2>Kurs tampilan</h2>
         </div>
         <form className={styles.staffForm} onSubmit={createRate}>
           <div className={styles.formGrid}>
             <label>
-              Currency
+              Mata uang
               <KookaSelect
                 ariaLabel="Currency kurs tampilan"
                 value={currency}
@@ -1908,48 +2242,323 @@ function CommercialAdmin({
               />
             </label>
             <label>
-              1 IDR dalam currency
-              <input
+              Nilai 1 {currency} dalam rupiah
+              <MoneyInput
+                ariaLabel={`Nilai 1 ${currency} dalam rupiah`}
                 required
-                min="0"
-                step="0.000001"
-                type="number"
                 value={displayRate}
-                onChange={(event) => setDisplayRate(event.target.value)}
+                onChange={setDisplayRate}
               />
             </label>
           </div>
           <p className={styles.formHint}>
-            Nilai ini hanya estimasi tampilan. Folio, pembayaran, invoice, dan
-            refund tetap diproses dalam IDR.
+            Contoh: bila 1 USD sekitar Rp16.500, masukkan 16.500. Nilai ini
+            hanya untuk estimasi tampilan; seluruh transaksi tetap IDR.
           </p>
           <button className={styles.primaryButton}>Simpan kurs tampilan</button>
         </form>
       </section>
       <section className={`${styles.panel} ${styles.actionGridWide}`}>
         <div className={styles.panelHeader}>
-          <h2>Commercial master</h2>
+          <h2>Pengaturan yang aktif</h2>
           <span className={styles.countPill}>
-            {taxes.length} tax · {rates.length} rate plan · {exchange.length}{" "}
-            kurs
+            {activeTaxes.length} pajak · {activeRates.length} harga ·{" "}
+            {activeInstructions.length} rekening · {activePolicies.length}{" "}
+            kebijakan · {latestExchange.length} kurs
           </span>
         </div>
-        <div className={styles.masterList}>
-          {rates.map((rate) => (
-            <article
-              key={`${String(rate.ratePlanId)}-${String(rate.versionId)}`}
-            >
-              <div>
-                <strong>{String(rate.nameId ?? rate.code)}</strong>
-                <small>{String(rate.code)}</small>
-              </div>
-              <span className={styles.statusPill}>
-                {human(String(rate.lifecycleStatus ?? "draft"))}
-              </span>
-            </article>
-          ))}
+        <div className={styles.commercialGroups}>
+          <section className={styles.commercialGroup}>
+            <div className={styles.commercialGroupHeader}>
+              <h3>Pajak &amp; biaya layanan</h3>
+              <small>{activeTaxes.length} pengaturan berlaku</small>
+            </div>
+            <div className={styles.masterList}>
+              {activeTaxes.map((tax) => (
+                <article key={String(tax.versionId)}>
+                  <div>
+                    <strong>{String(tax.name ?? "Pengaturan pajak")}</strong>
+                    <small>
+                      {tax.domain === "LODGING"
+                        ? "Kamar"
+                        : tax.domain === "FNB"
+                          ? "F&B"
+                          : "Layanan / tour"}
+                      {tax.noTax
+                        ? " · tanpa pajak"
+                        : ` · pajak ${percent(tax.taxRate)} · layanan ${percent(tax.serviceChargeRate)}`}
+                    </small>
+                  </div>
+                  <div className={styles.commercialActions}>
+                    <span className={styles.statusPill}>
+                      {statusLabel(tax)}
+                    </span>
+                    <button
+                      className={styles.secondaryButton}
+                      onClick={() => editTax(tax)}
+                      type="button"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className={styles.dangerButton}
+                      onClick={() =>
+                        setRetireTarget({
+                          subject: "TAX_PROFILE",
+                          versionId: String(tax.versionId),
+                          label: String(tax.name ?? "Pengaturan pajak"),
+                        })
+                      }
+                      type="button"
+                    >
+                      Nonaktifkan
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {!activeTaxes.length ? (
+                <p className={styles.emptyCompact}>
+                  Belum ada pengaturan pajak yang aktif.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.commercialGroup}>
+            <div className={styles.commercialGroupHeader}>
+              <h3>Harga kamar</h3>
+              <small
+                className={
+                  activeInstructions.length
+                    ? styles.configurationReady
+                    : styles.configurationWarning
+                }
+              >
+                {activeRates.length} harga berlaku ·{" "}
+                {activeInstructions.length
+                  ? `${activeInstructions.length} rekening transfer aktif`
+                  : "belum ada rekening transfer aktif"}
+              </small>
+            </div>
+            <div className={styles.masterList}>
+              {activeRates.map((rate) => {
+                const rule = rateRuleFor(rate);
+                const linkedTax = activeTaxes.find(
+                  (tax) =>
+                    String(tax.profileId) === String(rate.taxProfileId ?? ""),
+                );
+                const linkedPolicy = activePolicies.find(
+                  (policy) =>
+                    String(policy.policySetId) ===
+                    String(rate.cancellationPolicySetId ?? ""),
+                );
+                return (
+                  <article key={String(rate.versionId)}>
+                    <div>
+                      <strong>{String(rate.nameId ?? "Harga kamar")}</strong>
+                      <small>
+                        {roomTypeName(rule?.roomTypeId)} ·{" "}
+                        {idr(rule?.nightlyRateIdr)} / malam · minimum{" "}
+                        {String(rule?.minimumStay ?? 1)} malam
+                        {linkedTax
+                          ? ` · ${String(linkedTax.name)}`
+                          : " · tanpa pajak"}
+                      </small>
+                      <small>
+                        Berlaku {dateLabel(rule?.startsOn)} –{" "}
+                        {dateLabel(rule?.endsOn)}
+                      </small>
+                      {linkedPolicy ? (
+                        <small>Kebijakan: {String(linkedPolicy.titleId)}</small>
+                      ) : null}
+                    </div>
+                    <div className={styles.commercialActions}>
+                      <span className={styles.statusPill}>
+                        {statusLabel(rate)}
+                      </span>
+                      <button
+                        className={styles.secondaryButton}
+                        onClick={() => editRatePlan(rate)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className={styles.dangerButton}
+                        onClick={() =>
+                          setRetireTarget({
+                            subject: "RATE_PLAN",
+                            versionId: String(rate.versionId),
+                            label: String(rate.nameId ?? "Harga kamar"),
+                          })
+                        }
+                        type="button"
+                      >
+                        Nonaktifkan
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+              {!activeRates.length ? (
+                <p className={styles.emptyCompact}>
+                  Belum ada harga kamar yang aktif.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.commercialGroup}>
+            <div className={styles.commercialGroupHeader}>
+              <h3>Rekening transfer</h3>
+              <small>{activeInstructions.length} rekening berlaku</small>
+            </div>
+            <div className={styles.masterList}>
+              {activeInstructions.map((instruction) => (
+                <article key={String(instruction.versionId)}>
+                  <div>
+                    <strong>{String(instruction.bankName ?? "Bank")}</strong>
+                    <small>
+                      {String(instruction.accountHolder ?? "—")} · rekening
+                      berakhir {String(instruction.accountNumberLast4 ?? "—")}
+                    </small>
+                  </div>
+                  <div className={styles.commercialActions}>
+                    <span className={styles.statusPill}>
+                      {statusLabel(instruction)}
+                    </span>
+                    <button
+                      className={styles.secondaryButton}
+                      onClick={() => editPaymentInstruction(instruction)}
+                      type="button"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className={styles.dangerButton}
+                      onClick={() =>
+                        setRetireTarget({
+                          subject: "PAYMENT_INSTRUCTION",
+                          versionId: String(instruction.versionId),
+                          label: `Rekening ${String(instruction.bankName ?? "bank")}`,
+                        })
+                      }
+                      type="button"
+                    >
+                      Nonaktifkan
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {!activeInstructions.length ? (
+                <p className={styles.emptyCompact}>
+                  Belum ada rekening transfer yang aktif.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.commercialGroup}>
+            <div className={styles.commercialGroupHeader}>
+              <h3>Kebijakan pembatalan &amp; refund</h3>
+              <small>{activePolicies.length} kebijakan berlaku</small>
+            </div>
+            <div className={styles.masterList}>
+              {activePolicies.map((policy) => (
+                <article key={String(policy.versionId)}>
+                  <div>
+                    <strong>{String(policy.titleId ?? "Kebijakan")}</strong>
+                    <small>
+                      {String(policy.contentId ?? "").slice(0, 150) ||
+                        "Isi kebijakan belum tersedia."}
+                    </small>
+                  </div>
+                  <div className={styles.commercialActions}>
+                    <span className={styles.statusPill}>
+                      {statusLabel(policy)}
+                    </span>
+                    <button
+                      className={styles.secondaryButton}
+                      onClick={() => editPolicy(policy)}
+                      type="button"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className={styles.dangerButton}
+                      onClick={() =>
+                        setRetireTarget({
+                          subject: "POLICY",
+                          versionId: String(policy.versionId),
+                          label: String(policy.titleId ?? "Kebijakan"),
+                        })
+                      }
+                      type="button"
+                    >
+                      Nonaktifkan
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {!activePolicies.length ? (
+                <p className={styles.emptyCompact}>
+                  Belum ada kebijakan pembatalan yang aktif.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.commercialGroup}>
+            <div className={styles.commercialGroupHeader}>
+              <h3>Kurs tampilan</h3>
+              <small>Hanya untuk estimasi; transaksi tetap IDR</small>
+            </div>
+            <div className={styles.masterList}>
+              {latestExchange.map((item) => (
+                <article key={String(item.quoteCurrency)}>
+                  <div>
+                    <strong>{String(item.quoteCurrency)}</strong>
+                    <small>
+                      1 {String(item.quoteCurrency)} ≈{" "}
+                      {idr(1 / Number(item.rate ?? 1))} · diperbarui{" "}
+                      {dateLabel(item.asOfAt)}
+                    </small>
+                  </div>
+                  <button
+                    className={styles.secondaryButton}
+                    onClick={() => {
+                      setCurrency(String(item.quoteCurrency));
+                      setDisplayRate(
+                        String(Math.round(1 / Number(item.rate ?? 1))),
+                      );
+                      scrollToForm("currency-settings-form");
+                    }}
+                    type="button"
+                  >
+                    Perbarui
+                  </button>
+                </article>
+              ))}
+              {!latestExchange.length ? (
+                <p className={styles.emptyCompact}>Belum ada kurs tampilan.</p>
+              ) : null}
+            </div>
+          </section>
         </div>
       </section>
+      <ReasonDialog
+        confirmLabel="Nonaktifkan pengaturan"
+        description="Pengaturan tidak akan dipakai untuk transaksi baru. Booking, invoice, dan riwayat lama tetap tersimpan tanpa berubah."
+        onCancel={() => {
+          setRetireTarget(null);
+          setRetireReason("");
+        }}
+        onChange={setRetireReason}
+        onConfirm={() => void retireVersion()}
+        open={Boolean(retireTarget)}
+        title={`Nonaktifkan ${retireTarget?.label ?? "pengaturan"}?`}
+        value={retireReason}
+      />
     </div>
   );
 }
@@ -2488,21 +3097,39 @@ function ReportAdmin({ setNotice }: { setNotice: (notice: Notice) => void }) {
       });
     }
   }
-  async function exportCsv(event: React.FormEvent) {
+  async function exportExcel(event: React.FormEvent) {
     event.preventDefault();
     try {
-      const result = await post("/api/staff/reports", {
-        action: "EXPORT_CSV",
-        reportCode,
-        rangeStart,
-        rangeEnd,
+      const response = await fetch("/api/staff/reports", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": key("EXPORT_EXCEL"),
+        },
+        body: JSON.stringify({
+          action: "EXPORT_EXCEL",
+          reportCode,
+          rangeStart,
+          rangeEnd,
+        }),
       });
-      const url = result.downloadUrl ?? result.url;
+      if (!response.ok) {
+        const result: unknown = await response.json().catch(() => null);
+        throw new Error(messageFrom(result));
+      }
+      const workbook = await response.blob();
+      const url = URL.createObjectURL(workbook);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `kooka-${reportCode.toLowerCase().replaceAll("_", "-")}-${rangeStart}-${rangeEnd}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
       setNotice({
         tone: "success",
-        message: "Export CSV privacy-safe berhasil dibuat.",
+        message: "Laporan Excel berhasil dibuat dan diunduh.",
       });
-      if (url) window.location.assign(String(url));
     } catch (error) {
       setNotice({
         tone: "error",
@@ -2539,13 +3166,28 @@ function ReportAdmin({ setNotice }: { setNotice: (notice: Notice) => void }) {
               Jalankan rollover
             </button>
           </div>
+          <div className={styles.operationExplanation}>
+            <p>
+              <strong>Reconciliation</strong>
+              Memeriksa apakah booking, kamar, pembayaran, tagihan, refund, dan
+              dokumen saling sesuai. Sistem hanya membuat daftar exception untuk
+              ditinjau dan tidak mengubah transaksi secara otomatis.
+            </p>
+            <p>
+              <strong>Rollover</strong>
+              Menjalankan pergantian hari operasional: membuat tugas stayover
+              yang belum ada dan memeriksa exception hari tersebut. Biasanya
+              berjalan otomatis; tombol ini dipakai untuk UAT atau jika proses
+              otomatis perlu dijalankan ulang.
+            </p>
+          </div>
         </div>
       </section>
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
-          <h2>Export CSV</h2>
+          <h2>Export Excel</h2>
         </div>
-        <form className={styles.staffForm} onSubmit={exportCsv}>
+        <form className={styles.staffForm} onSubmit={exportExcel}>
           <label>
             Jenis laporan
             <KookaSelect
@@ -2586,7 +3228,7 @@ function ReportAdmin({ setNotice }: { setNotice: (notice: Notice) => void }) {
               />
             </div>
           </div>
-          <button className={styles.primaryButton}>Buat export</button>
+          <button className={styles.primaryButton}>Download Excel</button>
         </form>
       </section>
     </div>

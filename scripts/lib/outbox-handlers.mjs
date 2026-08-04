@@ -269,12 +269,26 @@ export async function buildFinancialDocumentPdf(row, logoBytes) {
 
   ensureSpace(180);
   y -= 2;
-  const totals = [
-    ["SUBTOTAL", snapshot.subtotalIdr],
-    ["SERVICE", snapshot.serviceChargeIdr],
-    ["TAX", snapshot.taxIdr],
-    ["DISCOUNT", snapshot.discountIdr],
-  ];
+  const paymentsIdr = Number(snapshot.paymentsIdr ?? 0);
+  const refundsIdr = Number(snapshot.refundsIdr ?? 0);
+  const chargeTotalIdr = Number(
+    snapshot.chargeTotalIdr ?? snapshot.totalIdr ?? 0,
+  );
+  const balanceIdr = Number(snapshot.balanceIdr ?? snapshot.totalIdr ?? 0);
+  const totals =
+    row.document_type === "RECEIPT"
+      ? [["PAYMENTS", paymentsIdr || snapshot.totalIdr]]
+      : row.document_type === "REFUND_NOTE"
+        ? [["REFUNDS", refundsIdr || snapshot.totalIdr]]
+        : [
+            ["SUBTOTAL", snapshot.subtotalIdr],
+            ["SERVICE", snapshot.serviceChargeIdr],
+            ["TAX", snapshot.taxIdr],
+            ["DISCOUNT", snapshot.discountIdr],
+            ["TOTAL CHARGES", chargeTotalIdr],
+            ...(paymentsIdr > 0 ? [["PAYMENTS", -paymentsIdr]] : []),
+            ...(refundsIdr > 0 ? [["REFUNDS", refundsIdr]] : []),
+          ];
   for (const [label, amount] of totals) {
     page.drawText(label, {
       x: 224,
@@ -299,7 +313,9 @@ export async function buildFinancialDocumentPdf(row, logoBytes) {
       ? "TOTAL PAID"
       : row.document_type === "REFUND_NOTE"
         ? "TOTAL REFUND"
-        : "TOTAL";
+        : row.document_type === "FOLIO_STATEMENT"
+          ? "BALANCE"
+          : "BALANCE DUE";
   page.drawText(totalLabel, {
     x: 224,
     y,
@@ -307,7 +323,11 @@ export async function buildFinancialDocumentPdf(row, logoBytes) {
     font: bold,
     color: white,
   });
-  const totalText = idr(snapshot.totalIdr);
+  const totalText = idr(
+    ["INVOICE", "PROFORMA", "FOLIO_STATEMENT"].includes(row.document_type)
+      ? balanceIdr
+      : snapshot.totalIdr,
+  );
   page.drawText(totalText, {
     x: 389 - bold.widthOfTextAtSize(totalText, 9.5),
     y: y - 1,
@@ -412,6 +432,38 @@ function stableMessageId(event, appUrl) {
     .digest("hex")
     .slice(0, 32);
   return `<kooka-${reference}@${host}>`;
+}
+
+function financialDocumentEmailHtml(row, appUrl) {
+  const documentLabel = escapeHtml(String(row.document_type ?? "INVOICE"));
+  const documentNumber = escapeHtml(String(row.document_number));
+  const recipientName = escapeHtml(row.recipient_name ?? "Guest");
+  const logoUrl = `${String(appUrl).replace(/\/$/u, "")}/images/kooka-logo-official.png`;
+  return `<!doctype html>
+<html lang="${row.language === "en" ? "en" : "id"}">
+  <body style="margin:0;background:#f3efe7;color:#153f35;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3efe7;padding:32px 12px;">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#fffdf8;border:1px solid #d9ded7;">
+          <tr><td style="background:#103c32;padding:24px 32px;"><img src="${escapeHtml(logoUrl)}" width="154" alt="KOOKA Residence" style="display:block;width:154px;max-width:100%;height:auto;background:#fffdf8;border-radius:5px;padding:6px 10px;" /></td></tr>
+          <tr><td style="padding:42px 36px 18px;">
+            <div style="color:#b85e41;font-size:12px;font-weight:700;letter-spacing:2px;line-height:1.5;">${documentLabel}</div>
+            <h1 style="margin:14px 0 18px;color:#153f35;font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.15;font-weight:400;">${row.language === "en" ? "Your document is ready." : "Dokumen Anda telah siap."}</h1>
+            <p style="margin:0;color:#536d66;font-size:16px;line-height:1.7;">${row.language === "en" ? `Hello ${recipientName}, your official document is attached to this email as a PDF.` : `Halo ${recipientName}, dokumen resmi Anda terlampir pada email ini dalam format PDF.`}</p>
+          </td></tr>
+          <tr><td style="padding:14px 36px 38px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#edf1e9;border-left:4px solid #628269;"><tr><td style="padding:20px 22px;">
+              <div style="color:#75857e;font-size:11px;font-weight:700;letter-spacing:1.6px;">DOCUMENT NUMBER</div>
+              <div style="margin-top:7px;color:#153f35;font-family:Georgia,'Times New Roman',serif;font-size:23px;line-height:1.25;word-break:break-word;">${documentNumber}</div>
+            </td></tr></table>
+            <p style="margin:22px 0 0;color:#536d66;font-size:14px;line-height:1.7;">${row.language === "en" ? "All official amounts are processed in Indonesian Rupiah (IDR)." : "Seluruh nominal resmi diproses dalam Rupiah Indonesia (IDR)."}</p>
+          </td></tr>
+          <tr><td style="border-top:1px solid #d9ded7;padding:22px 36px 28px;color:#73817c;font-size:12px;line-height:1.6;">KOOKA Residence Surabaya · Darmo Permai Selatan XVI / 28, Surabaya</td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`;
 }
 
 export function createOutboxHandlers(environment, pool) {
@@ -521,13 +573,22 @@ export function createOutboxHandlers(environment, pool) {
         client.release();
       }
     }
-    if (event?.payload?.emailAfterRender && row.recipient_email) {
+    if (
+      event?.payload?.emailAfterRender &&
+      row.recipient_email &&
+      row.document_type === "INVOICE"
+    ) {
+      const documentText =
+        row.language === "en"
+          ? `Attached is ${row.document_type} ${row.document_number} from KOOKA Residence Surabaya. All official amounts are in IDR.`
+          : `Terlampir ${row.document_type} ${row.document_number} dari KOOKA Residence Surabaya. Seluruh nominal resmi dalam IDR.`;
       await transporter.sendMail({
         messageId: stableMessageId(event, environment.APP_URL),
         from,
         to: row.recipient_email,
         subject: `${row.document_type} ${row.document_number}`,
-        text: `Attached is ${row.document_type} ${row.document_number} from KOOKA Residence Surabaya. All official amounts are in IDR.`,
+        text: documentText,
+        html: financialDocumentEmailHtml(row, environment.APP_URL),
         attachments: [
           {
             filename: `${row.document_number}.pdf`,
@@ -571,6 +632,11 @@ export function createOutboxHandlers(environment, pool) {
       const to = requiredString(payload?.to, "email payload.to");
       const subject = requiredString(payload?.subject, "email payload.subject");
       const text = requiredString(payload?.text, "email payload.text");
+      const customerEmailType = payload?.customerEmailType;
+      const html =
+        typeof payload?.html === "string" && payload.html.trim()
+          ? payload.html
+          : `<p>${escapeHtml(text).replaceAll("\n", "<br>")}</p>`;
       const state = await pool.query(
         "select status from notification_messages where id = $1",
         [messageId],
@@ -581,13 +647,25 @@ export function createOutboxHandlers(environment, pool) {
       if (state.rows[0]?.status === "SENT") {
         return { skipped: "already-sent" };
       }
+      if (
+        !["PAYMENT_RECORDED", "BOOKING_CONFIRMED"].includes(customerEmailType)
+      ) {
+        await pool.query(
+          `update notification_messages
+           set status = 'CANCELLED', last_error = 'Suppressed by customer email policy',
+               updated_at = now(), version = version + 1
+           where id = $1 and status = 'QUEUED'`,
+          [messageId],
+        );
+        return { skipped: "customer-email-policy" };
+      }
       const info = await transporter.sendMail({
         messageId: stableMessageId(event, environment.APP_URL),
         from,
         to,
         subject,
         text,
-        html: `<p>${escapeHtml(text).replaceAll("\n", "<br>")}</p>`,
+        html,
       });
       await pool.query(
         `update notification_messages
@@ -731,42 +809,6 @@ export function createOutboxHandlers(environment, pool) {
            set status = 'CANCELLED', updated_at = now(), version = version + 1
            where reservation_id = $1 and status = 'QUEUED'`,
           [reservationId],
-        );
-        const language = reservation.language;
-        const subject =
-          language === "en"
-            ? `Booking expired ${reservation.booking_code}`
-            : `Booking kedaluwarsa ${reservation.booking_code}`;
-        const text =
-          language === "en"
-            ? `Booking ${reservation.booking_code} expired because no payment evidence was recorded before the deadline. Please make a new booking or contact Front Office.`
-            : `Booking ${reservation.booking_code} kedaluwarsa karena belum ada bukti pembayaran yang tercatat sebelum batas waktu. Silakan buat booking baru atau hubungi Front Office.`;
-        const message = await client.query(
-          `insert into notification_messages
-             (property_id, reservation_id, channel, recipient, status,
-              rendered_subject, rendered_body, scheduled_at, idempotency_key)
-           values ($1, $2, 'EMAIL', $3, 'QUEUED', $4, $5, now(), $6)
-           returning id`,
-          [
-            reservation.property_id,
-            reservationId,
-            reservation.booker_email_normalized,
-            subject,
-            text,
-            `reservation:${reservationId}:expired`,
-          ],
-        );
-        await client.query(
-          `insert into outbox_events
-             (topic, aggregate_type, aggregate_id, payload, available_at)
-           values ('notification.email', 'notification_message', $1,
-             jsonb_build_object('messageId', $1, 'to', $2, 'subject', $3, 'text', $4), now())`,
-          [
-            message.rows[0].id,
-            reservation.booker_email_normalized,
-            subject,
-            text,
-          ],
         );
         await client.query(
           `insert into audit_events

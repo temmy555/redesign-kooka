@@ -7,6 +7,7 @@ import {
 } from "../../../../src/modules/commerce/fnb-service";
 import { parsePagination } from "../../../../src/platform/pagination";
 import { databaseDate } from "../../../../src/platform/database-values";
+import { foodOrderStatusLabel } from "../../../../src/modules/commerce/fnb-status";
 import FnbActions from "../../_components/FnbActions";
 import FnbHistoryFilters from "../../_components/FnbHistoryFilters";
 import PaginationControls from "../../_components/PaginationControls";
@@ -75,7 +76,7 @@ export default async function FnbPage({
     }),
   ]);
   const active = orders.filter(
-    (order) => !["COMPLETED", "CANCELLED"].includes(order.status),
+    (order) => !["SERVED", "COMPLETED", "CANCELLED"].includes(order.status),
   );
   return (
     <>
@@ -93,34 +94,9 @@ export default async function FnbPage({
       </header>
       <div className={styles.metricGrid}>
         <article className={styles.metricCard}>
-          <span>Pesanan aktif</span>
+          <span>Sedang diproses</span>
           <strong>{active.length}</strong>
-          <small>Belum completed</small>
-        </article>
-        <article className={styles.metricCard}>
-          <span>Baru masuk</span>
-          <strong>
-            {active.filter((order) => order.status === "ENTERED").length}
-          </strong>
-          <small>Menunggu diterima</small>
-        </article>
-        <article className={styles.metricCard}>
-          <span>Sedang disiapkan</span>
-          <strong>
-            {
-              active.filter((order) =>
-                ["ACCEPTED", "PREPARING"].includes(order.status),
-              ).length
-            }
-          </strong>
-          <small>Accepted dan preparing</small>
-        </article>
-        <article className={styles.metricCard}>
-          <span>Siap disajikan</span>
-          <strong>
-            {active.filter((order) => order.status === "READY").length}
-          </strong>
-          <small>Menunggu served</small>
+          <small>Pesanan sedang dibuat atau disiapkan</small>
         </article>
       </div>
       <div className={styles.moduleStack}>
@@ -166,7 +142,7 @@ export default async function FnbPage({
                       <strong>{idr(total)}</strong>
                     </div>
                     <span className={styles.statusPill}>
-                      {human(order.status)}
+                      {foodOrderStatusLabel(order.status)}
                     </span>
                     <span className={styles.foodOrderChevron}>⌄</span>
                   </summary>

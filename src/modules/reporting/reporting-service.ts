@@ -27,10 +27,81 @@ import {
   REPORT_TIMEZONE,
   type ReconciliationAction,
   type ReportCode,
-  serializeCsv,
   statusForReconciliationAction,
   validateDateRange,
 } from "./contracts";
+
+const EXCEL_REPORT_COLUMNS: Record<
+  ReportCode,
+  Array<{ key: string; label: string; width: number; numeric?: boolean }>
+> = {
+  DAILY_OPERATIONS: [
+    { key: "bookingCode", label: "Kode booking", width: 24 },
+    { key: "reservationStatus", label: "Status booking", width: 18 },
+    { key: "roomLine", label: "Baris kamar", width: 12, numeric: true },
+    { key: "checkInDate", label: "Check-in", width: 14 },
+    { key: "checkoutDate", label: "Check-out", width: 14 },
+    { key: "lineStatus", label: "Status kamar", width: 18 },
+    { key: "guestName", label: "Nama tamu (disamarkan)", width: 28 },
+    { key: "stayStatus", label: "Status menginap", width: 18 },
+    { key: "roomNumber", label: "Nomor kamar", width: 14 },
+  ],
+  BOOKINGS: [
+    { key: "bookingCode", label: "Kode booking", width: 24 },
+    { key: "reservationStatus", label: "Status booking", width: 18 },
+    { key: "roomLine", label: "Baris kamar", width: 12, numeric: true },
+    { key: "checkInDate", label: "Check-in", width: 14 },
+    { key: "checkoutDate", label: "Check-out", width: 14 },
+    { key: "lineStatus", label: "Status kamar", width: 18 },
+    { key: "guestName", label: "Nama tamu (disamarkan)", width: 28 },
+    { key: "stayStatus", label: "Status menginap", width: 18 },
+    { key: "roomNumber", label: "Nomor kamar", width: 14 },
+  ],
+  FINANCIAL_LEDGER: [
+    { key: "bookingCode", label: "Kode booking", width: 24 },
+    { key: "serviceDate", label: "Tanggal layanan", width: 16 },
+    { key: "entryType", label: "Tipe entri", width: 14 },
+    { key: "category", label: "Kategori", width: 18 },
+    { key: "description", label: "Deskripsi", width: 36 },
+    { key: "amountIdr", label: "Nominal IDR", width: 18, numeric: true },
+    { key: "currency", label: "Mata uang", width: 12 },
+    { key: "sourceType", label: "Sumber", width: 18 },
+  ],
+  CLEANING: [
+    { key: "taskType", label: "Jenis tugas", width: 20 },
+    { key: "priority", label: "Prioritas", width: 14 },
+    { key: "status", label: "Status", width: 18 },
+    { key: "roomNumber", label: "Nomor kamar", width: 14 },
+    { key: "targetAt", label: "Target", width: 24 },
+    { key: "completedAt", label: "Selesai", width: 24 },
+    { key: "inspectedAt", label: "Diperiksa", width: 24 },
+  ],
+  RECONCILIATION: [
+    { key: "checkCode", label: "Kode pemeriksaan", width: 30 },
+    { key: "severity", label: "Tingkat", width: 14 },
+    { key: "status", label: "Status", width: 18 },
+    { key: "entityType", label: "Jenis data", width: 18 },
+    { key: "businessDate", label: "Business date", width: 16 },
+    { key: "detectedAt", label: "Terdeteksi", width: 24 },
+    { key: "lastDetectedAt", label: "Terakhir terdeteksi", width: 24 },
+    {
+      key: "occurrenceCount",
+      label: "Jumlah kejadian",
+      width: 16,
+      numeric: true,
+    },
+    { key: "resolutionReason", label: "Alasan penyelesaian", width: 34 },
+    { key: "resolutionReference", label: "Referensi", width: 24 },
+  ],
+};
+
+const EXCEL_REPORT_TITLES: Record<ReportCode, string> = {
+  DAILY_OPERATIONS: "Laporan Operasional Harian",
+  BOOKINGS: "Laporan Booking",
+  FINANCIAL_LEDGER: "Laporan Financial Ledger",
+  CLEANING: "Laporan Cleaning",
+  RECONCILIATION: "Laporan Reconciliation",
+};
 
 interface QueueRow extends Record<string, unknown> {
   queueType: string;
@@ -66,7 +137,7 @@ export async function getOperationalDashboard(params: {
   const db = getDatabase();
 
   const queueResult = await db.execute<QueueRow>(sql`
-    select 'ARRIVAL'::text as "queueType", st.id as "entityId", r.booking_code as "bookingCode",
+    select 'ARRIVAL'::text as "queueType", rr.id as "entityId", r.booking_code as "bookingCode",
       ru.room_number as "roomNumber", coalesce(g.full_name, r.booker_name) as "guestName",
       st.status, st.planned_arrival_at as "scheduledAt", null::numeric::text as "amountIdr",
       case when ra.id is null then 'ROOM_UNASSIGNED' else null end as alert
@@ -79,15 +150,30 @@ export async function getOperationalDashboard(params: {
     where r.property_id = ${params.propertyId} and rr.check_in_date = ${businessDate}::date
       and st.status in ('NOT_STARTED','DUE_IN','NO_SHOW')
     union all
-    select 'DEPARTURE', st.id, r.booking_code, ru.room_number, coalesce(g.full_name, r.booker_name),
-      st.status, st.planned_departure_at, null::numeric::text,
-      case when st.status = 'DUE_OUT' then 'CHECKOUT_PENDING' else null end
+    select 'DEPARTURE', rr.id, r.booking_code, ru.room_number, coalesce(g.full_name, r.booker_name),
+      st.status, st.planned_departure_at, coalesce(folio_balance.balance_idr, 0)::text,
+      case
+        when abs(coalesce(folio_balance.balance_idr, 0)) >= 0.5 then 'FOLIO_UNSETTLED'
+        when st.status = 'DUE_OUT' then 'CHECKOUT_PENDING'
+        else null
+      end
     from room_stays st
     join reservation_rooms rr on rr.id = st.reservation_room_id
     join reservations r on r.id = rr.reservation_id
     left join guests g on g.id = st.lead_guest_id
     left join room_assignments ra on ra.room_stay_id = st.id and ra.status = 'ACTIVE'
     left join room_units ru on ru.id = ra.room_unit_id
+    left join folios f on f.reservation_id = r.id
+    left join lateral (
+      select coalesce(sum(
+        case when entry.entry_type = 'DEBIT'
+          then entry.total_amount_idr
+          else -entry.total_amount_idr
+        end
+      ), 0) as balance_idr
+      from folio_entries entry
+      where entry.folio_id = f.id
+    ) folio_balance on true
     where r.property_id = ${params.propertyId} and rr.checkout_date = ${businessDate}::date
       and st.status in ('IN_HOUSE','DUE_OUT')
     union all
@@ -98,7 +184,7 @@ export async function getOperationalDashboard(params: {
       and rr.check_in_date <= (${businessDate}::date + 7) and rr.line_status = 'ACTIVE'
       and r.status in ('ON_HOLD','CONFIRMED')
     union all
-    select 'UNASSIGNED', st.id, r.booking_code, null, coalesce(g.full_name, r.booker_name), st.status,
+    select 'UNASSIGNED', rr.id, r.booking_code, null, coalesce(g.full_name, r.booker_name), st.status,
       st.planned_arrival_at, null::numeric::text, 'ROOM_UNASSIGNED'
     from room_stays st
     join reservation_rooms rr on rr.id = st.reservation_room_id
@@ -649,7 +735,7 @@ async function loadExportRows(
     rangeStart: string;
     rangeEnd: string;
   },
-) {
+): Promise<Array<Record<string, unknown>>> {
   if (
     params.reportCode === "BOOKINGS" ||
     params.reportCode === "DAILY_OPERATIONS"
@@ -702,7 +788,7 @@ async function loadExportRows(
   return result.rows;
 }
 
-export async function createCsvReportExport(params: {
+export async function createExcelReportExport(params: {
   propertyId: string;
   reportCode: ReportCode;
   rangeStart: string;
@@ -714,7 +800,7 @@ export async function createCsvReportExport(params: {
   validateDateRange(params.rangeStart, params.rangeEnd, EXPORT_MAX_DAYS);
   return withIdempotency(
     {
-      scope: "reporting.csv.export",
+      scope: "reporting.excel.export",
       key: params.idempotencyKey,
       requestHash: stableRequestHash(params),
       ownerUserId: params.session.user.id,
@@ -727,7 +813,18 @@ export async function createCsvReportExport(params: {
           "VALIDATION_ERROR",
           `Export exceeds ${EXPORT_MAX_ROWS} rows; use a smaller range`,
         );
-      const csv = serializeCsv(rows);
+      const columns = EXCEL_REPORT_COLUMNS[params.reportCode];
+      const excelRows = rows.map((row) =>
+        columns.map((column) => {
+          const value = row[column.key];
+          if (column.numeric && value !== null && value !== undefined) {
+            const number = Number(value);
+            return Number.isFinite(number) ? number : String(value);
+          }
+          if (value instanceof Date) return value.toISOString();
+          return value === null || value === undefined ? "" : String(value);
+        }),
+      );
       const generatedAt = new Date();
       const expiresAt = new Date(generatedAt.getTime() + 15 * 60 * 1000);
       const [reportExport] = await tx
@@ -735,6 +832,7 @@ export async function createCsvReportExport(params: {
         .values({
           propertyId: params.propertyId,
           reportCode: params.reportCode,
+          format: "XLSX",
           filters: {
             rangeStart: params.rangeStart,
             rangeEnd: params.rangeEnd,
@@ -776,8 +874,13 @@ export async function createCsvReportExport(params: {
         resultId: reportExport.id,
         response: {
           reportExportId: reportExport.id,
-          filename: `kooka-${params.reportCode.toLowerCase().replaceAll("_", "-")}-${params.rangeStart}-${params.rangeEnd}.csv`,
-          csv,
+          filename: `kooka-${params.reportCode.toLowerCase().replaceAll("_", "-")}-${params.rangeStart}-${params.rangeEnd}.xlsx`,
+          sheetName: EXCEL_REPORT_TITLES[params.reportCode].slice(0, 31),
+          title: EXCEL_REPORT_TITLES[params.reportCode],
+          subtitle: `Periode ${params.rangeStart} sampai ${params.rangeEnd} · Asia/Jakarta · data sensitif disamarkan`,
+          headers: columns.map((column) => column.label),
+          columnWidths: columns.map((column) => column.width),
+          rows: excelRows,
           rowCount: rows.length,
           expiresAt: expiresAt.toISOString(),
         },

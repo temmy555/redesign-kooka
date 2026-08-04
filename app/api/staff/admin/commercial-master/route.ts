@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   publishCommercialVersion,
+  retireCommercialVersion,
   reviewCommercialVersion,
 } from "../../../../../src/modules/configuration/commercial-lifecycle";
 import {
@@ -173,6 +174,12 @@ const actionSchema = z.discriminatedUnion("action", [
     reason,
   }),
   z.object({
+    action: z.literal("RETIRE_VERSION"),
+    subject: versionSubject,
+    versionId: z.string().uuid(),
+    reason,
+  }),
+  z.object({
     action: z.literal("PREVIEW_RESOLVED_RATE"),
     ratePlanCode: z.string().trim().min(1).max(64),
     roomTypeId: z.string().uuid(),
@@ -267,6 +274,10 @@ export async function POST(request: Request) {
       case "PUBLISH_VERSION":
         return NextResponse.json(
           await publishCommercialVersion({ ...requestContext, ...body }),
+        );
+      case "RETIRE_VERSION":
+        return NextResponse.json(
+          await retireCommercialVersion({ ...requestContext, ...body }),
         );
       case "PREVIEW_RESOLVED_RATE":
         await requirePermission(

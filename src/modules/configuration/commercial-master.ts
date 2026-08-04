@@ -58,6 +58,7 @@ export async function getCommercialMasterOverview(params: {
     instructions,
     documents,
     rates,
+    rateRulesOverview,
     exchangeRates,
   ] = await Promise.all([
     db
@@ -108,6 +109,8 @@ export async function getCommercialMasterOverview(params: {
         approvalStatus: policyVersions.approvalStatus,
         titleId: policyVersions.titleId,
         titleEn: policyVersions.titleEn,
+        contentId: policyVersions.contentId,
+        contentEn: policyVersions.contentEn,
         effectiveFrom: policyVersions.effectiveFrom,
         effectiveTo: policyVersions.effectiveTo,
         checksum: policyVersions.checksum,
@@ -183,6 +186,9 @@ export async function getCommercialMasterOverview(params: {
         nameId: ratePlanVersions.nameId,
         nameEn: ratePlanVersions.nameEn,
         sourceEligibility: ratePlanVersions.sourceEligibility,
+        paymentInstructionSetId: ratePlanVersions.paymentInstructionSetId,
+        cancellationPolicySetId: ratePlanVersions.cancellationPolicySetId,
+        taxProfileId: ratePlanVersions.taxProfileId,
         effectiveFrom: ratePlanVersions.effectiveFrom,
         effectiveTo: ratePlanVersions.effectiveTo,
       })
@@ -190,6 +196,26 @@ export async function getCommercialMasterOverview(params: {
       .leftJoin(ratePlanVersions, eq(ratePlanVersions.ratePlanId, ratePlans.id))
       .where(eq(ratePlans.propertyId, params.propertyId))
       .orderBy(ratePlans.code, desc(ratePlanVersions.versionNumber)),
+    db
+      .select({
+        id: rateRules.id,
+        ratePlanVersionId: rateRules.ratePlanVersionId,
+        roomTypeId: rateRules.roomTypeId,
+        name: rateRules.name,
+        ruleType: rateRules.ruleType,
+        startsOn: rateRules.startsOn,
+        endsOn: rateRules.endsOn,
+        nightlyRateIdr: rateRules.nightlyRateIdr,
+        minimumStay: rateRules.minimumStay,
+      })
+      .from(rateRules)
+      .innerJoin(
+        ratePlanVersions,
+        eq(ratePlanVersions.id, rateRules.ratePlanVersionId),
+      )
+      .innerJoin(ratePlans, eq(ratePlans.id, ratePlanVersions.ratePlanId))
+      .where(eq(ratePlans.propertyId, params.propertyId))
+      .orderBy(rateRules.priority, rateRules.startsOn),
     db
       .select({
         id: exchangeRateSnapshots.id,
@@ -215,6 +241,7 @@ export async function getCommercialMasterOverview(params: {
     documents,
     documentSequences: sequences,
     ratePlans: rates,
+    rateRules: rateRulesOverview,
     exchangeRates,
   };
 }

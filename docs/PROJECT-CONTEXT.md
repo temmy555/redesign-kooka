@@ -285,6 +285,8 @@ Keputusan state-transition:
 ### Early check-in dan late checkout
 
 - Jam standar default adalah check-in `14:00` dan checkout `12:00` dalam `Asia/Jakarta`; keduanya configurable, versioned/effective-dated, diaudit, dan disimpan sebagai policy snapshot booking agar perubahan tidak berlaku retroaktif diam-diam.
+- Jam standar hanya menjadi acuan informasi dan perencanaan. Early check-in serta late arrival/check-in tidak memiliki cutoff jam global; Front Office memutuskan langsung di lokasi selama booking masih berlaku dan unit siap.
+- Late checkout tidak memiliki batas jam global, tetapi harus mencatat waktu persetujuan, tidak boleh mengganggu booking berikutnya, dan berubah menjadi extension bila penggunaan masuk malam berikutnya.
 - Customer dapat memberi ETA/request, tetapi approval hanya dilakukan langsung oleh Front Office/Owner dan tidak dijamin oleh booking online.
 - Early check-in disetujui hanya jika reservation confirmed, unit assigned, previous guest telah checkout, dan unit memenuhi `Ready for Check-in`.
 - Late checkout ditolak bila ada confirmed next guest yang menunggu/akan segera datang, turnover tidak cukup, properti/room type penuh tanpa alternatif valid, atau unit harus dikosongkan untuk kebutuhan operasional.
@@ -296,6 +298,8 @@ Keputusan state-transition:
 - Detail lengkap tersedia di [EARLY-CHECKIN-LATE-CHECKOUT.md](EARLY-CHECKIN-LATE-CHECKOUT.md).
 
 ### Folio dan histori
+
+- Istilah teknis `folio` tetap dipakai pada domain, database, API, dan audit sebagai buku besar transaksi booking. Pada antarmuka staf dan customer, gunakan bahasa umum sesuai konteks: `Tagihan & dokumen`, `Tagihan tamu`, `Sisa tagihan`, dan `Rincian tagihan`.
 
 - Satu booking memiliki folio utama.
 - Folio memuat immutable debit/credit entries untuk room, package, POS, service, discount, tax/service, payment, reversal, refund, dan saldo.
@@ -462,6 +466,7 @@ Keputusan state-transition:
 - Service/tour memiliki resource scheduling dan lifecycle fulfillment sendiri tanpa mencampur payment status.
 - Package linkage membuat satu source order/booking dan tidak memposting included value dua kali.
 - Cancel fulfillment, financial void/reversal, refund, dan service-recovery credit adalah proses terpisah.
+- Pesanan F&B baru langsung berstatus `Sedang diproses`; staf hanya perlu memakai aksi `Tandai selesai / disajikan` atau membatalkan dengan alasan. Status internal lama tetap dipetakan untuk menjaga histori dan audit.
 - Detail lengkap tersedia di [POS-SERVICES-TOURS.md](POS-SERVICES-TOURS.md).
 
 ### Keluhan tamu dan service recovery
@@ -659,7 +664,7 @@ Daftar bernomor lengkap terdapat pada bagian “Open Configuration Register” d
 
 - Jumlah room type, unit fisik, dan komposisi whole house.
 - Booking online wajib lunas 100%; yang masih terbuka adalah role/default/limit deposit manual, remaining-balance due rule, dan maximum Payment Review Hold. Payment deadline awal sudah disepakati 2 jam dengan exception 1 jam untuk same-day/policy khusus.
-- Cancellation/no-show production values masih perlu diisi: window/fee/refund wording per channel/rate policy, arrival cutoff/contact attempt, release rule, dan customer notification. Model versioned policy/manual Front Office decision/no automatic refund sudah disetujui.
+- Cancellation/no-show production values masih perlu diisi: window/fee/refund wording per channel/rate policy, contact-attempt SOP, release rule, dan customer notification. Tidak ada arrival cutoff otomatis; model versioned policy/manual Front Office decision/no automatic refund sudah disetujui.
 - Struktur tarif, pajak/service charge, corporate/OTA/long-stay/seasonal rate, serta jam/ketersediaan pemesanan F&B.
 - Approval limit untuk discount, complimentary, void, dan refund.
 - Identitas legal invoice, provider/domain email, reply-to, serta kebijakan penyimpanan data.
@@ -678,7 +683,7 @@ Daftar bernomor lengkap terdapat pada bagian “Open Configuration Register” d
 - Trigger aktivasi Guest Case Phase 2, classification/severity, SLA/escalation owner, dan compensation approval threshold.
 - Cash point yang digunakan, opening float, SOP serah-terima manual Phase 1, variance threshold/approver, serta scope cash session Phase 2.
 - Jenis kunci/hardware, jumlah salinan, SOP issue/return/master key Phase 1, serta trigger key-tracking Phase 2.
-- Jam standar check-in/out telah diputuskan `14:00`/`12:00`. Earliest early check-in dan latest late checkout juga merupakan pengaturan Owner; nilai produksinya, turnover buffer, extension threshold, add-on price/tax, dan apakah form publik hanya ETA atau menerima request masih perlu diisi sebelum UAT.
+- Jam standar check-in/out telah diputuskan `14:00`/`12:00` sebagai acuan, bukan cutoff. Early/late arrival dan late checkout memakai keputusan Flexible Front Office tanpa earliest/latest global; turnover buffer, aturan extension ke malam berikutnya, add-on price/tax, dan apakah form publik hanya ETA atau menerima request masih perlu diisi sebelum UAT.
 - Nomor/field formulir F&B, processed marking, retention/pemusnahan, dan kebijakan printed-price mismatch.
 - Default/risk-based Departure Clearance, target/checker, skip/outstanding permission, checklist, serta retention evidence.
 - Kebijakan menerima titipan bagasi, batas waktu, barang terlarang/high-value, format tag/log dan verifikasi pickup Phase 1, serta trigger alih ke Lost & Found.
@@ -694,6 +699,21 @@ Daftar bernomor lengkap terdapat pada bagian “Open Configuration Register” d
 
 Technical Batch 1–6 (Langkah 9–21), Langkah 22A Staff UI Foundation, dan technical hardening Langkah 22B sudah ditulis dengan status `IMPLEMENTED — UNVERIFIED`; authentication/RBAC/shared platform Langkah 6–8 sudah `DONE`. Hardening 22B menghasilkan same-origin staff mutation guard, security headers, authorization matrix seluruh staff API, upload dimension/metadata sanitization, retention dry-run fail-closed, audit URL/header redaction, concurrency/idempotency database gates, stable email Message-ID, PDF/email retry recovery, performance baseline, dan localhost-only recovery rehearsal. Automated test dengan coverage threshold, format, zero-warning lint, strict type-check, schema/build/security checks, disposable PostgreSQL verification sampai `0012`, local performance 0% failure dengan p95 di bawah 750 ms, dan database dump/restore rehearsal telah lulus. Migration `0000`–`0013` sudah diterapkan ke database development lokal. Migration `0013` menetapkan OWNER sebagai Super Admin property dengan seluruh named permission terpasang melalui mapping RBAC, tanpa authorization bypass; menu operasional yang sudah memiliki UI telah diverifikasi langsung. Keputusan 2 Agustus 2026 menetapkan login email/password biasa tanpa MFA untuk seluruh role; plugin, MFA gate, dan halaman enrollment telah dihapus, sedangkan tabel migration lama dipertahankan sebagai kompatibilitas. AV engine, full CSP, private-storage restore, form/action UI lanjutan, browser/device/accessibility evidence, final nilai produksi, serta UAT Owner/staf tetap tertunda. Roadmap berikutnya adalah Langkah 23—UAT preparation dan execution. Production migration tetap hanya dijalankan setelah environment, backup/restore, configuration P0, dry-run, dan deployment checklist disetujui.
 
+## 4 Agustus 2026 — Checkout parsial booking multi-room
+
+- Checkout diproses per kamar/reservation room, bukan langsung menutup seluruh booking.
+- Setelah satu kamar selesai checkout, assignment fisiknya dilepas dan line kamar berubah menjadi `COMPLETED`; kamar lain dalam booking yang sama tetap aktif.
+- Line kamar yang sudah selesai tidak boleh kembali muncul sebagai `Belum dialokasikan` pada meja operasional. Riwayatnya tetap tersimpan untuk audit, sedangkan daftar check-in/kamar hanya menampilkan line yang masih aktif.
+- Booking dan tagihan utama baru ditutup setelah seluruh line kamar selesai checkout dan saldo tagihan booking sudah nol.
+
+## 4 Agustus 2026 — Rekening transfer berlaku global
+
+- Rekening bank merupakan konfigurasi properti KOOKA, bukan bagian dari jenis kamar atau harga kamar.
+- Seluruh rekening yang aktif ditampilkan kepada setiap tamu setelah booking online; tamu bebas memilih salah satunya untuk transfer.
+- Reservation menyimpan daftar versi rekening yang ditawarkan saat booking dibuat. Perubahan atau penonaktifan master rekening tidak mengubah instruksi historis booking yang sudah ada.
+- Front Office memilih rekening penerima ketika mencatat pembayaran transfer agar tujuan dana dapat diaudit.
+- Booking online hanya memerlukan minimal satu rekening properti aktif. Rate plan tidak lagi menyimpan pilihan rekening tertentu.
+
 ## 3 Agustus 2026 — Pagination riwayat operasional
 
 - Daftar yang terus bertambah memakai pagination server-side: booking dan pembayaran 20 baris (opsi 20/50/100), F&B 10 baris (opsi 10/20/50), attendance 25 baris (opsi 25/50/100), serta audit 50 baris (opsi 50/100).
@@ -701,3 +721,18 @@ Technical Batch 1–6 (Langkah 9–21), Langkah 22A Staff UI Foundation, dan tec
 - Antrean operasional yang membutuhkan tindakan tetap dipisahkan dari riwayat. Booking aktif, pembayaran menunggu verifikasi, dan pesanan F&B belum selesai tetap tersedia untuk form dan metrik walaupun riwayat sedang berada di halaman lain.
 - Ekspor Excel attendance selalu mengambil seluruh hasil filter rentang tanggal dan pencarian, bukan hanya baris pada halaman aktif.
 - Detail F&B tertutup secara default agar daftar panjang mudah dipindai. Live Room Monitor dan jadwal housekeeping hari ini tidak memakai pagination karena merupakan papan kondisi operasional saat ini, bukan riwayat transaksi.
+
+## 4 Agustus 2026 — Email customer dibatasi menjadi tiga jenis
+
+- Email customer Phase 1 hanya dikirim ketika bukti pembayaran dicatat, ketika pembayaran terverifikasi dan booking pertama kali memenuhi ambang konfirmasi, serta ketika Front Office menerbitkan dokumen invoice/tagihan untuk dikirim.
+- Booking baru, instruksi transfer, reminder deadline, pembayaran rejected/voided/partial, cancellation, dan expiry tidak mengirim email. Informasi tersebut tetap tersedia pada halaman `Cek Booking`, antarmuka staf, audit log, dan WhatsApp manual.
+- Email bukti pembayaran dan konfirmasi memakai template HTML KOOKA yang profesional, responsif, bilingual, menonjolkan status dan kode booking, serta menyediakan link kembali ke halaman booking. Plain-text fallback tetap disimpan.
+- Email konfirmasi memakai idempotency key per reservation dan hanya dibuat saat ambang pembayaran wajib pertama kali terpenuhi agar pelunasan/tambahan pembayaran berikutnya tidak mengirim konfirmasi berulang.
+- Email dokumen memakai tampilan branded dan tetap melampirkan PDF. Reset password staf tetap dipertahankan sebagai komunikasi keamanan akun internal, bukan email customer booking.
+
+## 4 Agustus 2026 — Cleaning kamar terisi atas permintaan tamu
+
+- Menu Housekeeping menyediakan bagian `Permintaan tamu untuk membersihkan kamar` untuk kamar yang masih dihuni.
+- Permintaan manual dibuat sebagai `GUEST_REQUEST` dengan izin masuk `GRANTED`; catatan dapat menjelaskan bahwa tamu sedang pergi atau permintaan khusus lainnya.
+- Tombol pekerjaan memakai lifecycle cleaning task `Requested → In Progress → Cleaned → Inspected`, bukan aksi cepat kesiapan kamar kosong.
+- Aksi cepat pada Pantauan Kamar tetap khusus kamar vacant. Occupancy kamar tidak berubah ketika tugas pembersihan stayover/permintaan tamu dimulai atau diselesaikan.

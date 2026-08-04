@@ -42,24 +42,20 @@ import { databaseDate } from "../../platform/database-values";
 import { stableRequestHash } from "../booking/domain";
 import { calculateNightAmounts } from "../booking/domain";
 import type { PublicMenuCategory, PublicMenuData } from "../content/contracts";
+import {
+  foodOrderStatusLabel,
+  foodOrderStatusesForFilter,
+  type FoodOrderStatus,
+} from "./fnb-status";
 
 export interface FnbStaffSession {
   user: { id: string };
 }
 
-export type FoodOrderStatus =
-  | "ENTERED"
-  | "ACCEPTED"
-  | "PREPARING"
-  | "READY"
-  | "SERVED"
-  | "COMPLETED"
-  | "CANCELLED";
-
 const FOOD_TRANSITIONS: Record<FoodOrderStatus, FoodOrderStatus[]> = {
-  ENTERED: ["ACCEPTED", "CANCELLED"],
-  ACCEPTED: ["PREPARING", "CANCELLED"],
-  PREPARING: ["READY", "CANCELLED"],
+  ENTERED: ["ACCEPTED", "PREPARING", "SERVED", "CANCELLED"],
+  ACCEPTED: ["PREPARING", "SERVED", "CANCELLED"],
+  PREPARING: ["READY", "SERVED", "CANCELLED"],
   READY: ["SERVED", "CANCELLED"],
   SERVED: ["COMPLETED", "CANCELLED"],
   COMPLETED: [],
@@ -73,7 +69,7 @@ export function assertFoodOrderTransition(
   if (!FOOD_TRANSITIONS[from].includes(to)) {
     throw new AppError(
       "CONFLICT",
-      `Food order cannot transition from ${from} to ${to}`,
+      `Status pesanan tidak dapat diubah dari ${foodOrderStatusLabel(from)} menjadi ${foodOrderStatusLabel(to)}`,
     );
   }
 }
@@ -525,7 +521,7 @@ export async function createPaperFoodOrder(params: {
           );
         }
         if (resolved.folioStatus !== "OPEN") {
-          throw new AppError("CONFLICT", "Folio is closed");
+          throw new AppError("CONFLICT", "Tagihan tamu sudah ditutup");
         }
         if (
           resolved.roomNumber.trim().toLowerCase() !==
@@ -553,7 +549,7 @@ export async function createPaperFoodOrder(params: {
           folioId: roomTarget?.folioId,
           billingBucketId: roomTarget?.billingBucketId,
           settlementRoute: params.settlementRoute,
-          status: "ENTERED",
+          status: "PREPARING",
           customerName: params.customerName ?? roomTarget?.leadGuestName,
           notes: params.notes,
           enteredByUserId: params.session.user.id,
@@ -673,7 +669,7 @@ export async function createPaperFoodOrder(params: {
       await tx.insert(foodOrderEvents).values({
         foodOrderId: order.id,
         action: "PAPER_ORDER_ENTERED",
-        toStatus: "ENTERED",
+        toStatus: "PREPARING",
         notes: `Paper ${paperReference}`,
         actorUserId: params.session.user.id,
         createdByUserId: params.session.user.id,
@@ -704,7 +700,7 @@ export async function createPaperFoodOrder(params: {
           orderId: order.id,
           orderCode: order.orderCode,
           paperReference,
-          status: "ENTERED",
+          status: "PREPARING",
           settlementRoute: params.settlementRoute,
           orderTotalIdr,
           items: createdItems,
@@ -811,7 +807,7 @@ export async function getFoodOrderQueue(params: {
     .where(
       and(
         eq(foodOrders.propertyId, params.propertyId),
-        notInArray(foodOrders.status, ["COMPLETED", "CANCELLED"]),
+        notInArray(foodOrders.status, ["SERVED", "COMPLETED", "CANCELLED"]),
       ),
     )
     .orderBy(desc(foodOrders.createdAt));
@@ -933,6 +929,10 @@ export async function getFoodOrderPage(params: {
   );
   const search = params.search?.trim().slice(0, 120) ?? "";
   const status = params.status?.trim().slice(0, 40) || "ALL";
+  const filteredStatuses = foodOrderStatusesForFilter(status);
+  const statusCondition = filteredStatuses
+    ? inArray(foodOrders.status, filteredStatuses)
+    : sql`true`;
   const offset = (params.page - 1) * params.pageSize;
   const database = getDatabase();
   const [countResult, rowsResult] = await Promise.all([
@@ -943,7 +943,7 @@ export async function getFoodOrderPage(params: {
         and (${search} = '' or order_code ilike ${`%${search}%`}
           or paper_reference ilike ${`%${search}%`}
           or coalesce(customer_name, '') ilike ${`%${search}%`})
-        and (${status} = 'ALL' or status = ${status})
+        and ${statusCondition}
     `),
     database.execute<FoodOrderQueueRow>(sql`
       select id, order_code as "orderCode", paper_reference as "paperReference",
@@ -955,7 +955,7 @@ export async function getFoodOrderPage(params: {
         and (${search} = '' or order_code ilike ${`%${search}%`}
           or paper_reference ilike ${`%${search}%`}
           or coalesce(customer_name, '') ilike ${`%${search}%`})
-        and (${status} = 'ALL' or status = ${status})
+        and ${statusCondition}
       order by created_at desc, id desc
       limit ${params.pageSize} offset ${offset}
     `),

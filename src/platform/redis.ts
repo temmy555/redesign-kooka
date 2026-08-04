@@ -24,6 +24,9 @@ export function createRedisConnection(
   options: { forBullMq?: boolean } = {},
 ): IORedis {
   const environment = parseApplicationEnvironment(process.env);
+  if (!environment.REDIS_URL) {
+    throw new Error("REDIS_URL is not configured");
+  }
   return new IORedis(environment.REDIS_URL, {
     maxRetriesPerRequest: options.forBullMq ? null : 20,
     enableReadyCheck: true,

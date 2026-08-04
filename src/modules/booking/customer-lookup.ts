@@ -10,6 +10,7 @@ import {
   paymentInstructionVersions,
   payments,
   reservations,
+  reservationPaymentInstructions,
   reservationRooms,
   roomTypes,
   roomTypeVersions,
@@ -158,7 +159,7 @@ export async function getCustomerBooking(params: {
     )
     .limit(1);
   if (!reservation) throw new AppError("UNAUTHORIZED", GENERIC_LOOKUP_ERROR);
-  const [rooms, folio, instruction] = await Promise.all([
+  const [rooms, folio, instructionSnapshots] = await Promise.all([
     db
       .select({
         lineNumber: reservationRooms.lineNumber,
@@ -192,9 +193,41 @@ export async function getCustomerBooking(params: {
       .from(folios)
       .where(eq(folios.reservationId, reservation.id))
       .limit(1),
-    reservation.paymentInstructionVersionId
-      ? db
-          .select()
+    db
+      .select({
+        id: paymentInstructionVersions.id,
+        bankName: paymentInstructionVersions.bankName,
+        accountHolder: paymentInstructionVersions.accountHolder,
+        accountNumberCiphertext:
+          paymentInstructionVersions.accountNumberCiphertext,
+        accountNumberLast4: paymentInstructionVersions.accountNumberLast4,
+        instructionId: paymentInstructionVersions.instructionId,
+        instructionEn: paymentInstructionVersions.instructionEn,
+      })
+      .from(reservationPaymentInstructions)
+      .innerJoin(
+        paymentInstructionVersions,
+        eq(
+          paymentInstructionVersions.id,
+          reservationPaymentInstructions.paymentInstructionVersionId,
+        ),
+      )
+      .where(eq(reservationPaymentInstructions.reservationId, reservation.id))
+      .orderBy(reservationPaymentInstructions.displayOrder),
+  ]);
+  const legacyInstructions =
+    instructionSnapshots.length === 0 && reservation.paymentInstructionVersionId
+      ? await db
+          .select({
+            id: paymentInstructionVersions.id,
+            bankName: paymentInstructionVersions.bankName,
+            accountHolder: paymentInstructionVersions.accountHolder,
+            accountNumberCiphertext:
+              paymentInstructionVersions.accountNumberCiphertext,
+            accountNumberLast4: paymentInstructionVersions.accountNumberLast4,
+            instructionId: paymentInstructionVersions.instructionId,
+            instructionEn: paymentInstructionVersions.instructionEn,
+          })
           .from(paymentInstructionVersions)
           .where(
             eq(
@@ -203,8 +236,10 @@ export async function getCustomerBooking(params: {
             ),
           )
           .limit(1)
-      : Promise.resolve([]),
-  ]);
+      : [];
+  const instructions = instructionSnapshots.length
+    ? instructionSnapshots
+    : legacyInstructions;
   const folioId = folio[0]?.id;
   const [entries, paymentRows] = folioId
     ? await Promise.all([
@@ -232,7 +267,17 @@ export async function getCustomerBooking(params: {
       (entry.entryType === "DEBIT" ? 1 : -1) * Number(entry.totalAmountIdr),
     0,
   );
-  const activeInstruction = instruction[0];
+  const publicInstructions = instructions.map((instruction) => ({
+    paymentInstructionVersionId: instruction.id,
+    bankName: instruction.bankName,
+    accountHolder: instruction.accountHolder,
+    accountNumber: decryptSensitiveValue(instruction.accountNumberCiphertext),
+    accountNumberLast4: instruction.accountNumberLast4,
+    instruction:
+      reservation.language === "en"
+        ? instruction.instructionEn
+        : instruction.instructionId,
+  }));
   const whatsappNumber = (
     process.env.WHATSAPP_CONTACT_NUMBER ?? "6283831455142"
   ).replace(/\D/g, "");
@@ -265,20 +310,8 @@ export async function getCustomerBooking(params: {
       amountIdr: Number(payment.amountIdr),
       receivedAt: payment.receivedAt?.toISOString() ?? null,
     })),
-    paymentInstruction: activeInstruction
-      ? {
-          bankName: activeInstruction.bankName,
-          accountHolder: activeInstruction.accountHolder,
-          accountNumber: decryptSensitiveValue(
-            activeInstruction.accountNumberCiphertext,
-          ),
-          accountNumberLast4: activeInstruction.accountNumberLast4,
-          instruction:
-            reservation.language === "en"
-              ? activeInstruction.instructionEn
-              : activeInstruction.instructionId,
-        }
-      : null,
+    paymentInstructions: publicInstructions,
+    paymentInstruction: publicInstructions[0] ?? null,
     whatsappUrl: whatsappNumber
       ? `https://wa.me/${whatsappNumber}?text=${whatsappText}`
       : null,

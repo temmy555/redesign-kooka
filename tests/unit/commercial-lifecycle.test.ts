@@ -38,6 +38,7 @@ vi.mock("../../src/platform/audit", () => ({
 
 import {
   publishCommercialVersion,
+  retireCommercialVersion,
   reviewCommercialVersion,
   type CommercialVersionSubject,
 } from "../../src/modules/configuration/commercial-lifecycle";
@@ -213,6 +214,81 @@ describe("commercial version lifecycle", () => {
       reason: "Policy wording needs revision",
     });
     expect(result.approvalStatus).toBe("REJECTED");
+  });
+
+  it.each(subjects)("retires an active %s version", async (subject) => {
+    mocks.select.mockReturnValue(chain([])).mockReturnValueOnce(
+      chain([
+        {
+          id: U3,
+          parentId: U2,
+          lifecycleStatus: "ACTIVE",
+          approvalStatus: "APPROVED",
+          effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+          effectiveTo: null,
+        },
+      ]),
+    );
+    const result = await retireCommercialVersion({
+      session,
+      propertyId: U1,
+      subject,
+      versionId: U3,
+      reason: "Commercial setting is no longer used",
+      now: new Date("2026-08-04T00:00:00.000Z"),
+    });
+    expect(result.lifecycleStatus).toBe("RETIRED");
+    expect(mocks.recordAuditEvent).toHaveBeenCalledOnce();
+  });
+
+  it("rejects retiring a draft commercial version", async () => {
+    mocks.select.mockReturnValueOnce(
+      chain([
+        {
+          id: U3,
+          parentId: U2,
+          lifecycleStatus: "DRAFT",
+          approvalStatus: "PENDING",
+          effectiveFrom: new Date("2026-08-04T00:00:00.000Z"),
+          effectiveTo: null,
+        },
+      ]),
+    );
+    await expect(
+      retireCommercialVersion({
+        session,
+        propertyId: U1,
+        subject: "TAX_PROFILE",
+        versionId: U3,
+        reason: "Draft should not be retired",
+      }),
+    ).rejects.toThrow("Only an active or scheduled");
+  });
+
+  it("protects tax settings still referenced by an active room price", async () => {
+    mocks.select
+      .mockReturnValueOnce(
+        chain([
+          {
+            id: U3,
+            parentId: U2,
+            lifecycleStatus: "ACTIVE",
+            approvalStatus: "APPROVED",
+            effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+            effectiveTo: null,
+          },
+        ]),
+      )
+      .mockReturnValueOnce(chain([{ name: "Harga Standar" }]));
+    await expect(
+      retireCommercialVersion({
+        session,
+        propertyId: U1,
+        subject: "TAX_PROFILE",
+        versionId: U3,
+        reason: "Stop using tax profile",
+      }),
+    ).rejects.toThrow("masih dipakai oleh harga kamar Harga Standar");
   });
 
   it.each(subjects)(

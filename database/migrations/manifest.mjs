@@ -106,4 +106,22 @@ export const migrations = Object.freeze([
     description:
       "Property and chronology indexes for paginated booking, payment, and audit histories",
   }),
+  Object.freeze({
+    id: "0018_global_payment_instructions",
+    path: "database/migrations/after-drizzle/0018_global_payment_instructions.sql",
+    description:
+      "Snapshot every active property bank account offered for each reservation",
+  }),
+  Object.freeze({
+    id: "0019_excel_report_exports",
+    path: "database/migrations/after-drizzle/0019_excel_report_exports.sql",
+    description:
+      "Allow audited privacy-safe Excel report exports while retaining historical CSV metadata",
+  }),
+  Object.freeze({
+    id: "0020_cancelled_room_assignment_cleanup",
+    path: "database/migrations/after-drizzle/0020_cancelled_room_assignment_cleanup.sql",
+    description:
+      "Release historical physical-room assignments and night claims left by cancelled or expired reservations",
+  }),
 ]);

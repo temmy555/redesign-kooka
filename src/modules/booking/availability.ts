@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import { getDatabase } from "../../db";
@@ -16,6 +16,7 @@ import {
 import type * as schema from "../../db/schema";
 import { AppError } from "../../platform/errors";
 import { enumerateStayDates } from "./domain";
+import { resolveActivePaymentInstructions } from "./payment-instructions";
 import type { SearchRequest } from "./contracts";
 
 type BookingDb = Pick<NodePgDatabase<typeof schema>, "execute" | "select">;
@@ -192,7 +193,8 @@ export async function searchAvailability(
 ) {
   const stayDates = validateSearchRequest(input);
   const db = getDatabase();
-  const types = await db
+  const now = new Date();
+  const typeRows = await db
     .select({
       id: roomTypes.id,
       code: roomTypes.code,
@@ -212,8 +214,19 @@ export async function searchAvailability(
         eq(roomTypes.propertyId, propertyId),
         eq(roomTypes.status, "ACTIVE"),
         eq(roomTypeVersions.lifecycleStatus, "ACTIVE"),
+        lte(roomTypeVersions.effectiveFrom, now),
+        or(
+          isNull(roomTypeVersions.effectiveTo),
+          gt(roomTypeVersions.effectiveTo, now),
+        ),
       ),
     );
+  // A room type can have historical versions. The effective-date predicate is
+  // the source of truth; this final guard keeps malformed overlapping legacy
+  // data from producing duplicate room cards in the public booking UI.
+  const types = [
+    ...new Map(typeRows.map((roomType) => [roomType.id, roomType])).values(),
+  ];
   await ensureInventoryDays(
     db,
     propertyId,
@@ -226,7 +239,6 @@ export async function searchAvailability(
     types.map((roomType) => roomType.id),
     stayDates,
   );
-  const now = new Date();
   const rateRows = await db
     .select({
       roomTypeId: rateRules.roomTypeId,
@@ -236,7 +248,6 @@ export async function searchAvailability(
       lifecycleStatus: ratePlanVersions.lifecycleStatus,
       approvalStatus: ratePlanVersions.approvalStatus,
       sourceEligibility: ratePlanVersions.sourceEligibility,
-      paymentInstructionSetId: ratePlanVersions.paymentInstructionSetId,
       effectiveFrom: ratePlanVersions.effectiveFrom,
       effectiveTo: ratePlanVersions.effectiveTo,
       ruleId: rateRules.id,
@@ -266,20 +277,27 @@ export async function searchAvailability(
       ),
     );
 
+  const paymentInstructions = await resolveActivePaymentInstructions(
+    db,
+    propertyId,
+    now,
+  );
+
   const ruleRank: Record<string, number> = {
     BASE: 1,
     WEEK_PATTERN: 2,
     SEASONAL: 3,
     SPECIAL_DATE: 4,
   };
-  const activeRates = rateRows.filter(
-    (row) =>
-      row.effectiveFrom <= now &&
-      (!row.effectiveTo || row.effectiveTo > now) &&
-      ["APPROVED", "NOT_REQUIRED"].includes(row.approvalStatus) &&
-      ["ALL", "ONLINE"].includes(row.sourceEligibility) &&
-      Boolean(row.paymentInstructionSetId),
-  );
+  const activeRates = paymentInstructions.length
+    ? rateRows.filter(
+        (row) =>
+          row.effectiveFrom <= now &&
+          (!row.effectiveTo || row.effectiveTo > now) &&
+          ["APPROVED", "NOT_REQUIRED"].includes(row.approvalStatus) &&
+          ["ALL", "ONLINE"].includes(row.sourceEligibility),
+      )
+    : [];
   const offerFor = (roomTypeId: string) => {
     const codes = [
       ...new Set(

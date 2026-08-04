@@ -84,6 +84,9 @@ interface BookingDeskRow extends Record<string, unknown> {
   requiredPaymentIdr: string;
   paymentDeadlineAt: Date | null;
   folioId: string | null;
+  folioBalanceIdr: string;
+  folioChargeTotalIdr: string;
+  verifiedPaymentIdr: string;
   rooms: Array<Record<string, unknown>>;
 }
 
@@ -114,7 +117,18 @@ export async function GET(request?: Request) {
         select count(*)::text as total
         from reservations r
         where r.property_id = ${propertyId}
-          and (${operational} = false or r.status not in ('CANCELLED', 'EXPIRED', 'COMPLETED'))
+          and (${operational} = false
+            or r.status not in ('CANCELLED', 'EXPIRED', 'COMPLETED')
+            or (r.status = 'COMPLETED' and exists (
+              select 1
+              from folios outstanding_folio
+              join folio_entries outstanding_entry on outstanding_entry.folio_id = outstanding_folio.id
+              where outstanding_folio.reservation_id = r.id
+              group by outstanding_folio.id
+              having abs(sum(case when outstanding_entry.entry_type = 'DEBIT'
+                then outstanding_entry.total_amount_idr
+                else -outstanding_entry.total_amount_idr end)) >= 0.5
+            )))
           and (${search} = '' or r.booking_code ilike ${`%${search}%`}
             or r.booker_name ilike ${`%${search}%`}
             or r.booker_email ilike ${`%${search}%`})
@@ -125,7 +139,18 @@ export async function GET(request?: Request) {
         select r.id, r.created_at
         from reservations r
         where r.property_id = ${propertyId}
-          and (${operational} = false or r.status not in ('CANCELLED', 'EXPIRED', 'COMPLETED'))
+          and (${operational} = false
+            or r.status not in ('CANCELLED', 'EXPIRED', 'COMPLETED')
+            or (r.status = 'COMPLETED' and exists (
+              select 1
+              from folios outstanding_folio
+              join folio_entries outstanding_entry on outstanding_entry.folio_id = outstanding_folio.id
+              where outstanding_folio.reservation_id = r.id
+              group by outstanding_folio.id
+              having abs(sum(case when outstanding_entry.entry_type = 'DEBIT'
+                then outstanding_entry.total_amount_idr
+                else -outstanding_entry.total_amount_idr end)) >= 0.5
+            )))
           and (${search} = '' or r.booking_code ilike ${`%${search}%`}
             or r.booker_name ilike ${`%${search}%`}
             or r.booker_email ilike ${`%${search}%`})
@@ -137,6 +162,9 @@ export async function GET(request?: Request) {
         r.booker_email as "bookerEmail", r.source, r.status,
         r.payment_mode as "paymentMode", r.required_payment_idr::text as "requiredPaymentIdr",
         r.payment_deadline_at as "paymentDeadlineAt", f.id as "folioId",
+        coalesce(folio_balance.balance_idr, 0)::text as "folioBalanceIdr",
+        coalesce(folio_balance.charge_total_idr, 0)::text as "folioChargeTotalIdr",
+        coalesce(folio_balance.verified_payment_idr, 0)::text as "verifiedPaymentIdr",
         coalesce(jsonb_agg(jsonb_build_object(
           'reservationRoomId', rr.id,
           'roomStayId', st.id,
@@ -158,6 +186,7 @@ export async function GET(request?: Request) {
       from paged_reservations page
       join reservations r on r.id = page.id
       left join reservation_rooms rr on rr.reservation_id = r.id
+        and (${operational} = false or rr.line_status = 'ACTIVE')
       left join room_stays st on st.reservation_room_id = rr.id
       left join lateral (
         select ra.room_unit_id
@@ -185,7 +214,33 @@ export async function GET(request?: Request) {
         limit 1
       ) registration_identity on true
       left join folios f on f.reservation_id = r.id
-      group by r.id, f.id, page.created_at
+      left join lateral (
+        select coalesce(sum(
+          case when entry.entry_type = 'DEBIT'
+            then entry.total_amount_idr
+            else -entry.total_amount_idr
+          end
+        ), 0) as balance_idr,
+        coalesce(sum(case
+          when entry.category not in ('PAYMENT', 'PAYMENT_REVERSAL', 'REFUND')
+            and entry.entry_type = 'DEBIT' then entry.total_amount_idr
+          when entry.category not in ('PAYMENT', 'PAYMENT_REVERSAL', 'REFUND')
+            and entry.entry_type = 'CREDIT' then -entry.total_amount_idr
+          else 0
+        end), 0) as charge_total_idr,
+        coalesce(sum(case
+          when entry.category = 'PAYMENT' and entry.entry_type = 'CREDIT'
+            then entry.total_amount_idr
+          when entry.category = 'PAYMENT_REVERSAL' and entry.entry_type = 'DEBIT'
+            then -entry.total_amount_idr
+          else 0
+        end), 0) as verified_payment_idr
+        from folio_entries entry
+        where entry.folio_id = f.id
+      ) folio_balance on true
+      group by r.id, f.id, folio_balance.balance_idr,
+        folio_balance.charge_total_idr, folio_balance.verified_payment_idr,
+        page.created_at
       order by page.created_at desc, r.id desc
     `),
     ]);

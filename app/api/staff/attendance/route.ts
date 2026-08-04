@@ -6,6 +6,7 @@ import {
   getSelfAttendance,
   recordAttendance,
 } from "../../../../src/modules/attendance/attendance-service";
+import { createExcelWorkbook } from "../../../../src/platform/excel-workbook";
 import { AuthorizationError } from "../../../../src/platform/authorization";
 import { AppError, toErrorResponse } from "../../../../src/platform/errors";
 import {
@@ -85,6 +86,15 @@ function responseFor(error: unknown) {
   return NextResponse.json(response.body, { status: response.status });
 }
 
+function dateLabel(value: string) {
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00Z`));
+}
+
 export async function GET(request: Request) {
   try {
     const session = await requireCurrentSession();
@@ -99,18 +109,67 @@ export async function GET(request: Request) {
         search: url.searchParams.get("search") ?? undefined,
         exportAll: url.searchParams.get("export") === "1",
       });
-      return NextResponse.json(
-        await getAttendanceReport({
-          session,
-          propertyId,
-          startDate: dates.startDate,
-          endDate: dates.endDate,
-          page: dates.page,
-          pageSize: dates.pageSize,
-          search: dates.search,
-          exportAll: dates.exportAll,
-        }),
-      );
+      const report = await getAttendanceReport({
+        session,
+        propertyId,
+        startDate: dates.startDate,
+        endDate: dates.endDate,
+        page: dates.page,
+        pageSize: dates.pageSize,
+        search: dates.search,
+        exportAll: dates.exportAll,
+      });
+      if (!dates.exportAll) return NextResponse.json(report);
+      const workbook = await createExcelWorkbook({
+        sheetName: "Laporan Absensi",
+        title: "Laporan Absensi KOOKA Residence",
+        subtitle: `Periode ${dateLabel(report.range.start)} sampai ${dateLabel(report.range.end)}`,
+        headers: [
+          "Tanggal",
+          "Kode karyawan",
+          "Karyawan",
+          "Masuk",
+          "Keluar",
+          "Durasi (menit)",
+          "Lokasi",
+          "Status",
+        ],
+        rows: report.rows.map((row) => [
+          row.businessDate,
+          row.employeeCode,
+          row.employeeName,
+          row.checkedInAt
+            ? new Intl.DateTimeFormat("id-ID", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+                timeZone: "Asia/Jakarta",
+              }).format(new Date(row.checkedInAt))
+            : "—",
+          row.checkedOutAt
+            ? new Intl.DateTimeFormat("id-ID", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+                timeZone: "Asia/Jakarta",
+              }).format(new Date(row.checkedOutAt))
+            : "—",
+          row.durationMinutes,
+          row.locationName,
+          row.status,
+        ]),
+        columnWidths: [14, 18, 28, 12, 12, 16, 28, 20],
+      });
+      const filename = `laporan-absensi-${report.range.start}-${report.range.end}.xlsx`;
+      return new Response(workbook, {
+        status: 200,
+        headers: {
+          "Content-Type":
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Cache-Control": "private, no-store",
+        },
+      });
     }
     return NextResponse.json(await getSelfAttendance({ session, propertyId }));
   } catch (error) {

@@ -35,6 +35,12 @@ import {
   transitionFoodOrder,
 } from "../../src/modules/commerce/fnb-service";
 import {
+  foodOrderStatusLabel,
+  foodOrderStatusesForFilter,
+  nextSimpleFoodOrderAction,
+  nextSimpleFoodOrderStatus,
+} from "../../src/modules/commerce/fnb-status";
+import {
   activateMenuItemVersion,
   createMenuCategory,
   createMenuItemVersion,
@@ -183,11 +189,30 @@ describe("Batch 5 F&B domain and services", () => {
 
   it("enforces the fulfillment transition matrix", () => {
     expect(() =>
-      assertFoodOrderTransition("ENTERED", "ACCEPTED"),
+      assertFoodOrderTransition("ENTERED", "PREPARING"),
+    ).not.toThrow();
+    expect(() =>
+      assertFoodOrderTransition("PREPARING", "SERVED"),
     ).not.toThrow();
     expect(() => assertFoodOrderTransition("COMPLETED", "CANCELLED")).toThrow(
-      "cannot transition",
+      "Status pesanan tidak dapat diubah",
     );
+  });
+
+  it("maps legacy food-order states into the simplified staff workflow", () => {
+    expect(nextSimpleFoodOrderStatus("ENTERED")).toBe("SERVED");
+    expect(nextSimpleFoodOrderAction("ENTERED")).toBe(
+      "Tandai selesai / disajikan",
+    );
+    expect(nextSimpleFoodOrderStatus("READY")).toBe("SERVED");
+    expect(nextSimpleFoodOrderAction("READY")).toBe(
+      "Tandai selesai / disajikan",
+    );
+    expect(nextSimpleFoodOrderStatus("SERVED")).toBeUndefined();
+    expect(foodOrderStatusLabel("ENTERED")).toBe("Sedang diproses");
+    expect(foodOrderStatusLabel("ACCEPTED")).toBe("Sedang diproses");
+    expect(foodOrderStatusLabel("COMPLETED")).toBe("Selesai / disajikan");
+    expect(foodOrderStatusesForFilter("DONE")).toEqual(["SERVED", "COMPLETED"]);
   });
 
   it("formats an atomic daily paper reference using Jakarta date", () => {
@@ -420,7 +445,7 @@ describe("Batch 5 F&B domain and services", () => {
         chargePrivilege: "ALLOWED",
         folioStatus: "CLOSED",
       },
-      "Folio is closed",
+      "Tagihan tamu sudah ditutup",
     ],
   ])("rejects unsafe room-charge targets", async (override, message) => {
     const base = {
@@ -476,11 +501,11 @@ describe("Batch 5 F&B domain and services", () => {
       transitionFoodOrder({
         propertyId: U1,
         session,
-        idempotencyKey: "accepted",
+        idempotencyKey: "served",
         foodOrderId: U2,
-        toStatus: "ACCEPTED",
+        toStatus: "SERVED",
       }),
-    ).resolves.toMatchObject({ status: "ACCEPTED" });
+    ).resolves.toMatchObject({ status: "SERVED" });
   });
 
   it("cancels an order by reversing folio entries and flagging paid refunds", async () => {

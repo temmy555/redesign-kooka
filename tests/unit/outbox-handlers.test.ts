@@ -80,6 +80,41 @@ describe("outbox delivery hardening", () => {
     );
   });
 
+  it("does not email non-invoice financial documents", async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [
+          {
+            property_id: "property-1",
+            document_number: "RCT-1",
+            document_type: "RECEIPT",
+            recipient_name: "Guest",
+            recipient_email: "guest@example.test",
+            rendered_file_id: "file-1",
+            rendered_storage_key: "property-1/financial-documents/d/v.pdf",
+            rendered_snapshot: {},
+          },
+        ],
+      }),
+      connect: vi.fn(),
+    };
+
+    const result = await createOutboxHandlers(environment, pool)[
+      "financial-document.render"
+    ]({
+      id: "event-receipt",
+      topic: "financial-document.render",
+      payload: {
+        documentId: "document-receipt",
+        versionId: "version-receipt",
+        emailAfterRender: true,
+      },
+    });
+
+    expect(result).toMatchObject({ fileId: "file-1" });
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
   it("uses a stable Message-ID and skips messages already marked sent", async () => {
     const queuedPool = {
       query: vi
@@ -95,6 +130,8 @@ describe("outbox delivery hardening", () => {
         to: "guest@example.test",
         subject: "Booking",
         text: "Confirmed",
+        html: '<main data-template="kooka">Confirmed</main>',
+        customerEmailType: "BOOKING_CONFIRMED",
       },
     };
     await createOutboxHandlers(environment, queuedPool)["notification.email"](
@@ -102,6 +139,9 @@ describe("outbox delivery hardening", () => {
     );
     const firstMessageId = sendMail.mock.calls[0]?.[0].messageId;
     expect(firstMessageId).toMatch(/^<kooka-[a-f0-9]{32}@kooka\.example>$/u);
+    expect(sendMail.mock.calls[0]?.[0].html).toBe(
+      '<main data-template="kooka">Confirmed</main>',
+    );
 
     const sentPool = {
       query: vi.fn().mockResolvedValue({ rows: [{ status: "SENT" }] }),
@@ -110,6 +150,34 @@ describe("outbox delivery hardening", () => {
       createOutboxHandlers(environment, sentPool)["notification.email"](event),
     ).resolves.toEqual({ skipped: "already-sent" });
     expect(sendMail).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses legacy customer email types left in the queue", async () => {
+    const pool = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [{ status: "QUEUED" }] })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 }),
+    };
+    const result = await createOutboxHandlers(environment, pool)[
+      "notification.email"
+    ]({
+      id: "legacy-reminder",
+      topic: "notification.email",
+      payload: {
+        messageId: "message-reminder",
+        to: "guest@example.test",
+        subject: "Payment deadline reminder",
+        text: "Legacy reminder",
+      },
+    });
+
+    expect(result).toEqual({ skipped: "customer-email-policy" });
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(pool.query).toHaveBeenLastCalledWith(
+      expect.stringContaining("Suppressed by customer email policy"),
+      ["message-reminder"],
+    );
   });
 
   it("renders room and combined documents with the same A5 invoice format", async () => {
@@ -126,6 +194,10 @@ describe("outbox delivery hardening", () => {
           serviceChargeIdr: 0,
           taxIdr: 0,
           discountIdr: 0,
+          chargeTotalIdr: 510000,
+          paymentsIdr: 510000,
+          refundsIdr: 0,
+          balanceIdr: 0,
           totalIdr: 510000,
           entries: [
             {
@@ -145,6 +217,15 @@ describe("outbox delivery hardening", () => {
               quantity: 2,
               unitAmountIdr: 30000,
               totalAmountIdr: 60000,
+            },
+            {
+              date: "2026-08-03",
+              description: "Payment PAY-TEST",
+              category: "PAYMENT",
+              entryType: "CREDIT",
+              quantity: 1,
+              unitAmountIdr: 510000,
+              totalAmountIdr: 510000,
             },
           ],
         },

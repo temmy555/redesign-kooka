@@ -155,6 +155,20 @@ describe("booking availability, pricing, and customer lookup", () => {
             maximumExtraBeds: 1,
             extraBedCapacityIncrement: 1,
           },
+          // Defensive fixture for malformed overlapping historical versions:
+          // the public response must still contain one card per room type.
+          {
+            id: U2,
+            code: "DELUXE",
+            nameId: "Deluxe",
+            nameEn: "Deluxe",
+            maximumAdults: 2,
+            maximumChildren: 1,
+            maximumTotalGuests: 3,
+            extraBedAllowed: true,
+            maximumExtraBeds: 1,
+            extraBedCapacityIncrement: 1,
+          },
         ]),
       )
       .mockReturnValueOnce(
@@ -195,6 +209,24 @@ describe("booking availability, pricing, and customer lookup", () => {
             closedToDeparture: false,
           },
         ]),
+      )
+      .mockReturnValueOnce(
+        chain([
+          {
+            instructionSetId: U3,
+            setCode: "BANK-BCA",
+            id: U3,
+            versionNumber: 1,
+            bankName: "BCA",
+            accountHolder: "KOOKA Residence",
+            accountNumberCiphertext: "ciphertext",
+            accountNumberLast4: "9012",
+            instructionId: "Transfer dan kirim bukti.",
+            instructionEn: "Transfer and send proof.",
+            effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+            effectiveTo: null,
+          },
+        ]),
       );
     const result = await searchAvailability(U1, {
       checkInDate: "2026-08-03",
@@ -209,6 +241,7 @@ describe("booking availability, pricing, and customer lookup", () => {
       available: true,
       offer: expect.objectContaining({ ratePlanCode: "BAR" }),
     });
+    expect(result.roomTypes).toHaveLength(1);
   });
 
   it("returns the exact active policies required by public checkout", async () => {

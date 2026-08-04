@@ -380,7 +380,13 @@ describe("Batch 4 public pages", () => {
           extraBedCapacityIncrement: 0,
           availableRooms: 0,
           available: false,
-          offer: null,
+          offer: {
+            ratePlanCode: "FAMILY",
+            ratePlanNameId: "Harga keluarga",
+            ratePlanNameEn: "Family rate",
+            nightlyFromIdr: 800000,
+            estimatedStayIdr: 1600000,
+          },
         },
       ],
     };
@@ -410,9 +416,9 @@ describe("Batch 4 public pages", () => {
     );
     expect(id).toContain("2 kamar tersedia");
     expect(id).toContain("Extra bed hingga");
-    expect(id).toContain("Belum dapat dipesan");
+    expect(id).toContain("Sedang ditahan sementara");
     expect(en).toContain("2 rooms available");
-    expect(en).toContain("Not bookable yet");
+    expect(en).toContain("Temporarily held");
     expect(en).toContain("Select room");
     expect(empty).toContain("Search failed");
     expect(empty).toContain("Belum ada tipe kamar aktif");

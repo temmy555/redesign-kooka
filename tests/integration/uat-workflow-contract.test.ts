@@ -21,6 +21,9 @@ describe("Phase 1 UAT workflow contract", () => {
     expect(readFileSync("scripts/dev-uat.mjs", "utf8")).toContain(
       'scripts", "worker.mjs',
     );
+    expect(readFileSync("scripts/dev-uat.mjs", "utf8")).toContain(
+      "await migrate(migrationPool)",
+    );
   });
 
   it("seeds an effective document profile for PDF invoice testing", () => {

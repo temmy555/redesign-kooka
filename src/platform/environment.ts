@@ -31,8 +31,11 @@ export const applicationEnvironmentSchema = z
       .default(10_000),
     REDIS_URL: z
       .string()
-      .url()
+      .trim()
+      .optional()
+      .transform((value) => (value ? value : undefined))
       .refine((value) => {
+        if (!value) return true;
         const protocol = new URL(value).protocol;
         return protocol === "redis:" || protocol === "rediss:";
       }, "REDIS_URL must use redis:// or rediss://"),
@@ -46,11 +49,13 @@ export const applicationEnvironmentSchema = z
     SMTP_HOST: z.string().min(1),
     SMTP_PORT: z.coerce.number().int().min(1).max(65535),
     SMTP_FROM: z.string().min(3),
+    SMTP_USER: z.string().min(1).optional(),
+    SMTP_PASSWORD: z.string().min(1).optional(),
     MAILPIT_URL: z.string().url().optional(),
   })
   .superRefine((environment, context) => {
     if (environment.APP_ENV === "uat" || environment.APP_ENV === "production") {
-      for (const field of ["APP_URL", "DATABASE_URL", "REDIS_URL"] as const) {
+      for (const field of ["APP_URL", "DATABASE_URL"] as const) {
         if (usesLocalhost(environment[field])) {
           context.addIssue({
             code: "custom",
@@ -58,6 +63,14 @@ export const applicationEnvironmentSchema = z
             message: `${field} cannot use localhost in ${environment.APP_ENV}`,
           });
         }
+      }
+
+      if (environment.REDIS_URL && usesLocalhost(environment.REDIS_URL)) {
+        context.addIssue({
+          code: "custom",
+          path: ["REDIS_URL"],
+          message: `REDIS_URL cannot use localhost in ${environment.APP_ENV}`,
+        });
       }
 
       if (environment.MAILPIT_URL) {

@@ -46,7 +46,7 @@ Pekerjaan rollover harus idempotent dan aman diulang:
    otomatis. Task `Checkout` dibuat setelah action checkout benar-benar selesai,
    sedangkan permintaan pembersihan tamu dibuat langsung oleh Front Office.
 3. Menandai `Same-day Turnover` dan target ready time.
-4. Menandai `Arrival Overdue / Possible No Show` setelah arrival cutoff.
+4. Menandai `Arrival Overdue / Possible No Show` sebagai perhatian operasional setelah waktu kedatangan terlewati, tanpa mengubah status atau membatasi late check-in.
 5. Menampilkan booking yang belum memiliki room assignment.
 6. Menampilkan arrival dengan unit belum ready.
 7. Menampilkan departure yang belum checkout atau belum memperoleh extension.
@@ -74,8 +74,8 @@ Aturan default untuk booking online guaranteed:
 
 - Keterlambatan melewati expected arrival time tidak membatalkan booking.
 - Tamu yang datang pukul 00:00 setelah tanggal arrival tetap dapat check-in.
-- Bila belum datang sampai business-date rollover/cutoff, sistem memberi alert dan meminta Front Office mencoba menghubungi tamu.
-- `Mark No Show` merupakan action manual oleh Front Office/Owner setelah cutoff dan contact attempt dicatat.
+- Bila belum datang saat business-date rollover, sistem memberi alert dan meminta Front Office mencoba menghubungi tamu tanpa membatasi hak late check-in berdasarkan jam.
+- `Mark No Show` merupakan action manual oleh Front Office/Owner berdasarkan komunikasi dan kebijakan langsung di lokasi, bukan akibat cutoff otomatis.
 - Menandai `No Show` tidak otomatis melepas inventory untuk booking guaranteed.
 - Room-type commitment dipertahankan sampai checkout asli untuk seluruh malam yang telah dijamin, kecuali tamu membatalkan atau Front Office berizin melakukan release eksplisit berdasarkan kebijakan yang berlaku.
 - Multi-room guaranteed mempertahankan seluruh quantity kecuali customer dan Front Office menyepakati pelepasan sebagian secara eksplisit.
@@ -129,7 +129,7 @@ Contoh late-checkout risk: kamar seharusnya checkout, tetapi belum checkout dan 
 
 - Front Office dapat menghubungi tamu, mencatat contact attempt, menandai no-show, reinstate, dan check-in sesuai permission.
 - Front Office dengan permission `Release Guaranteed Inventory` dapat menjalankan action tanpa Owner approval. Action wajib menyimpan contact attempt, reason, policy snapshot, affected nights/quantity, financial consequence, dan audit.
-- Sistem menyimpan cutoff, actor, waktu, alasan, contact attempt, inventory disposition, policy version, notifikasi, serta financial consequence.
+- Sistem menyimpan actor, waktu, alasan, contact attempt, inventory disposition, policy version, notifikasi, serta financial consequence. Tidak ada cutoff kedatangan otomatis.
 - Customer late arrival dapat menerima pengingat bahwa kamar masih ditahan tetapi waktu checkout tidak berubah.
 - Semua action harus idempotent dan memakai concurrency/version check.
 

@@ -44,6 +44,9 @@ describe("clock / business-date service", () => {
     expect(toJakartaDateString(new Date("2026-08-02T00:30:00.000Z"))).toBe(
       "2026-08-02",
     );
+    expect(toJakartaDateString(new Date("2026-08-03T19:30:00.000Z"))).toBe(
+      "2026-08-04",
+    );
   });
 
   it("formats the Jakarta time as HH:MM:SS", () => {

@@ -22,7 +22,13 @@ export interface RedisHealth {
 }
 
 export async function checkRedisHealth(): Promise<RedisHealth> {
-  const connection = createRedisConnection();
+  let connection: ReturnType<typeof createRedisConnection>;
+  try {
+    connection = createRedisConnection();
+  } catch {
+    return { status: "unavailable" };
+  }
+
   try {
     const startedAt = performance.now();
     await connection.ping();

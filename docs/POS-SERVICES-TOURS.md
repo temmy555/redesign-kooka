@@ -27,18 +27,15 @@ Dokumen keputusan produk untuk fondasi Phase 1 dan fitur penuh Phase 2.
 
 ## 2. POS/F&B order lifecycle
 
-Status order/fulfillment:
+Status operasional yang ditampilkan kepada staf:
 
-- `Draft`: belum dikirim.
-- `New`: order sudah dibuat.
-- `Accepted`: diterima F&B.
-- `Preparing`: sedang dibuat.
-- `Ready`: siap disajikan/diambil.
-- `Served`: sudah diserahkan.
-- `Completed`: fulfillment selesai.
-- `Cancelled`: fulfillment dibatalkan.
+- `Sedang diproses`: pesanan langsung masuk ke tahap ini setelah dicatat dan sedang dibuat atau disiapkan.
+- `Selesai / disajikan`: pesanan sudah diserahkan dan tidak memerlukan proses lanjutan.
+- `Dibatalkan`: fulfillment dibatalkan dengan alasan.
 
-Cancellation reason minimal: customer request, unavailable item, duplicate, operational issue, quality issue, atau lainnya. Cancellation setelah `Preparing/Ready/Served` dapat membutuhkan waste/service-recovery note dan approval sesuai konfigurasi.
+Struktur internal tetap mengenali `New/Entered`, `Accepted`, `Preparing`, `Ready`, `Served`, `Completed`, dan `Cancelled` untuk kompatibilitas histori dan audit. Antarmuka mengelompokkannya ke status sederhana di atas sehingga staf hanya perlu menekan `Tandai selesai / disajikan`.
+
+Cancellation reason minimal: customer request, unavailable item, duplicate, operational issue, quality issue, atau lainnya. Cancellation setelah pesanan mulai diproses dapat membutuhkan waste/service-recovery note dan approval sesuai konfigurasi.
 
 Order status tidak menunjukkan apakah tagihan telah dibayar atau diposting ke folio.
 

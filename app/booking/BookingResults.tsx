@@ -81,7 +81,15 @@ interface ReservationResponse {
   totalIdr: number;
   requiredPaymentIdr: number;
   paymentDeadlineAt: string | null;
-  paymentInstruction: {
+  paymentInstructions: Array<{
+    paymentInstructionVersionId?: string;
+    bankName: string;
+    accountHolder: string;
+    accountNumber: string;
+    accountNumberLast4: string;
+    instruction: string;
+  }>;
+  paymentInstruction?: {
     bankName: string;
     accountHolder: string;
     accountNumber: string;
@@ -104,6 +112,8 @@ const roomImages = [
   "/images/agoda-kooka/room-generic-01.jpg",
   "/images/agoda-kooka/room-generic-02.jpg",
 ];
+
+const AVAILABILITY_REFRESH_MS = 15_000;
 
 function idempotencyKey(prefix: string) {
   const random =
@@ -299,9 +309,18 @@ export function BookingResultContent({
                         ? search.locale === "id"
                           ? `${room.availableRooms} kamar tersedia`
                           : `${room.availableRooms} rooms available`
-                        : search.locale === "id"
-                          ? "Belum dapat dipesan"
-                          : "Not bookable yet"}
+                        : room.offer && room.availableRooms === 0
+                          ? search.locale === "id"
+                            ? "Sedang ditahan sementara"
+                            : "Temporarily held"
+                          : room.offer &&
+                              room.availableRooms < result.requestedRooms
+                            ? search.locale === "id"
+                              ? `Hanya ${room.availableRooms} kamar tersedia`
+                              : `Only ${room.availableRooms} rooms available`
+                            : search.locale === "id"
+                              ? "Belum dapat dipesan"
+                              : "Not bookable yet"}
                     </p>
                     <h3>{name}</h3>
                     <p className="room-capacity">
@@ -377,6 +396,11 @@ function BookingConfirmation({
   email: string;
   locale: PublicLocale;
 }) {
+  const paymentInstructions = reservation.paymentInstructions?.length
+    ? reservation.paymentInstructions
+    : reservation.paymentInstruction
+      ? [reservation.paymentInstruction]
+      : [];
   const message =
     locale === "id"
       ? `Halo KOOKA, saya sudah melakukan transfer untuk booking ${reservation.bookingCode} sebesar ${money(reservation.requiredPaymentIdr)}. Saya akan mengirimkan bukti transfer pada chat ini.`
@@ -436,24 +460,27 @@ function BookingConfirmation({
                 {dateTimeLabel(reservation.paymentDeadlineAt, locale)} WIB
               </dd>
             </div>
-            <div>
-              <dt>{locale === "id" ? "Bank" : "Bank"}</dt>
-              <dd>{reservation.paymentInstruction?.bankName ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{locale === "id" ? "Nama rekening" : "Account holder"}</dt>
-              <dd>{reservation.paymentInstruction?.accountHolder ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{locale === "id" ? "Nomor rekening" : "Account number"}</dt>
-              <dd>{reservation.paymentInstruction?.accountNumber ?? "—"}</dd>
-            </div>
           </dl>
-          {reservation.paymentInstruction?.instruction ? (
-            <p className="transfer-instruction">
-              {reservation.paymentInstruction.instruction}
-            </p>
-          ) : null}
+          <p className="transfer-choice-label">
+            {locale === "id"
+              ? "Pilih salah satu rekening KOOKA berikut:"
+              : "Choose any KOOKA account below:"}
+          </p>
+          <div className="transfer-account-list">
+            {paymentInstructions.map((instruction, index) => (
+              <div
+                className="transfer-account"
+                key={`${instruction.bankName}-${instruction.accountNumberLast4}-${index}`}
+              >
+                <strong>{instruction.bankName}</strong>
+                <span>{instruction.accountNumber}</span>
+                <small>{instruction.accountHolder}</small>
+                {instruction.instruction ? (
+                  <p>{instruction.instruction}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
         </article>
         <article className="payment-steps-card">
           <p className="eyebrow">
@@ -464,8 +491,8 @@ function BookingConfirmation({
               <span>1</span>
               <p>
                 {locale === "id"
-                  ? "Transfer tepat sejumlah tagihan ke rekening di atas."
-                  : "Transfer the exact amount to the account above."}
+                  ? "Transfer tepat sejumlah tagihan ke salah satu rekening di atas."
+                  : "Transfer the exact amount to any account above."}
               </p>
             </li>
             <li>
@@ -527,21 +554,43 @@ export default function BookingResults({ search }: { search: SearchInput }) {
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
 
   useEffect(() => {
+    if (quote) return;
     const controller = new AbortController();
-    loadAvailability(search, controller.signal)
-      .then(setResult)
-      .catch((reason: unknown) => {
+    let requestInFlight = false;
+
+    async function refreshAvailability(initial: boolean) {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const nextResult = await loadAvailability(search, controller.signal);
+        setResult(nextResult);
+        setError("");
+      } catch (reason) {
         if (!(reason instanceof DOMException && reason.name === "AbortError")) {
-          setError(
-            search.locale === "id"
-              ? "Ketersediaan belum dapat dimuat. Silakan coba kembali."
-              : "Availability could not be loaded. Please try again.",
-          );
+          if (initial) {
+            setError(
+              search.locale === "id"
+                ? "Ketersediaan belum dapat dimuat. Silakan coba kembali."
+                : "Availability could not be loaded. Please try again.",
+            );
+          }
         }
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [search]);
+      } finally {
+        requestInFlight = false;
+        if (initial) setLoading(false);
+      }
+    }
+
+    void refreshAvailability(true);
+    const interval = window.setInterval(
+      () => void refreshAvailability(false),
+      AVAILABILITY_REFRESH_MS,
+    );
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [quote, search]);
 
   const displayStay = useMemo(
     () =>

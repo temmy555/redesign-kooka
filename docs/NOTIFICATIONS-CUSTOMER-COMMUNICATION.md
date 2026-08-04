@@ -2,8 +2,8 @@
 
 | Informasi        | Nilai                                                         |
 | ---------------- | ------------------------------------------------------------- |
-| Versi            | 1.2 Draft                                                     |
-| Tanggal          | 1 Agustus 2026                                                |
+| Versi            | 1.3 Draft                                                     |
+| Tanggal          | 4 Agustus 2026                                                |
 | Scope            | Phase 1 communication foundation; Phase 3 WhatsApp automation |
 | Sumber kebutuhan | [PRD.md](PRD.md)                                              |
 
@@ -48,19 +48,16 @@ Setelah booking dibuat, customer langsung melihat:
 
 Website tidak menerima atau memproses pembayaran pada tahap ini. Halaman hanya menampilkan instruksi transfer manual yang berlaku.
 
-Instruksi menggunakan payment-instruction snapshot booking. Perubahan rekening tidak mengganti tampilan booking lama sampai `Reissue Payment Instruction` berhasil; reissue mengantrekan notifikasi old/new context yang aman tanpa pernah meminta customer mengabaikan booking code atau mentransfer berdasarkan pesan tidak terverifikasi.
+Instruksi menggunakan payment-instruction snapshot booking. Perubahan rekening
+tidak mengganti tampilan booking lama; informasi rekening historis tetap dapat
+dilihat melalui halaman `Cek Booking` tanpa mengirim email tambahan.
 
-### 3.2 Email pertama
+### 3.2 Tidak ada email saat booking baru dibuat
 
-Sistem mengantrekan email `Selesaikan Pembayaran Booking` yang berisi:
-
-- Booking code.
-- Ringkasan dan nominal IDR.
-- Deadline beserta zona waktu Asia/Jakarta.
-- Instruksi transfer ringkas.
-- Link `Lihat & Bayar Booking`.
-
-Link boleh mengisi booking code secara otomatis, tetapi customer tetap harus memasukkan email booking. Setelah valid, sistem membuat session berumur pendek agar data lookup tidak dikirim berulang pada setiap request.
+Kode booking, total, deadline, seluruh rekening transfer, dan instruksi pembayaran
+ditampilkan langsung pada halaman booking berhasil serta halaman `Cek Booking`.
+Booking baru tidak mengirim email instruksi pembayaran atau reminder. Customer
+mengirim kode booking dan bukti transfer melalui WhatsApp sesuai alur manual.
 
 ### 3.3 Kembali melalui Cek Booking
 
@@ -83,7 +80,8 @@ Konfigurasi awal yang disepakati:
 - Checkout-session hold: default 15 menit sejak customer memasuki tahap penyelesaian booking.
 - Public online payment deadline: default 2 jam sejak booking `On Hold/Pending Payment` dibuat.
 - Deadline 1 jam hanya untuk same-day booking atau policy khusus yang dikonfigurasi admin.
-- Reminder dijadwalkan 30 menit sebelum deadline.
+- Tidak ada reminder deadline melalui email. Deadline tetap terlihat pada halaman
+  `Cek Booking` dan antrean operasional Front Office.
 - Seluruh deadline ditampilkan dengan waktu absolut Asia/Jakarta selain countdown.
 
 Deadline pembayaran berarti customer telah melakukan transfer dan menyerahkan bukti/referensi sebelum batas waktu; bukan batas waktu bagi admin untuk menyelesaikan verifikasi.
@@ -102,9 +100,12 @@ Jika tidak ada bukti/referensi yang tercatat sampai deadline, reservation menjad
 
 - Payment `Verified` diposting ke folio.
 - Untuk booking online publik, reservation menjadi `Confirmed` dan guarantee classification `Guaranteed` hanya setelah pembayaran 100% terverifikasi. Verified partial payment tetap tampil sebagai credit/outstanding dan tidak melewati confirmation guard.
-- Customer menerima konfirmasi booking dan receipt/dokumen yang relevan.
+- Email konfirmasi dikirim satu kali ketika ambang pembayaran wajib pertama kali
+  terpenuhi dan booking terkonfirmasi. Verifikasi pembayaran sebagian tidak
+  mengirim email.
 - Payment `Rejected` tidak mengurangi saldo; alasan customer-facing tidak boleh mengekspos catatan internal.
-- Rejection mengarahkan customer untuk menghubungi Front Office atau mengirim bukti yang benar selama hold/review policy masih mengizinkan.
+- Rejection terlihat pada halaman `Cek Booking` dan ditangani melalui Front
+  Office/WhatsApp; sistem tidak mengirim email rejection.
 
 ## 6. Event, message, dan delivery dipisahkan
 
@@ -151,19 +152,24 @@ Recipient disimpan berdasarkan peran, bukan hanya satu field email:
 
 Satu orang dapat memegang beberapa peran. Sistem melakukan dedupe untuk pesan yang sama, tetapi routing invoice terpisah tetap mengikuti instruksi billing.
 
-## 10. Notifikasi customer minimum
+## 10. Email customer Phase 1
 
-Phase 1 mendukung event berikut:
+Hanya tiga jenis email customer yang dikirim:
 
-- Booking dibuat dan instruksi pembayaran.
-- Reminder sebelum payment deadline.
-- Bukti pembayaran sedang direview.
-- Pembayaran verified atau rejected.
-- Booking confirmed, amended, cancelled, atau expired.
-- Pre-arrival reminder dan informasi late arrival/contact.
-- Invoice, receipt, dan refund note tersedia.
-- Early check-in/late checkout request diterima, approved, rejected, cancelled, atau changed; pesan menegaskan request belum dijamin sebelum approved dan menampilkan approved time/charge IDR bila ada.
-- Lost & Found: kandidat item ditemukan, informasi verifikasi diperlukan, claim verified/rejected, pickup schedule/ready/handover, shipment/tracking/delivery failure, serta retention reminder bila policy mengharuskan.
+1. Bukti pembayaran telah dicatat dan menunggu verifikasi Front Office.
+2. Pembayaran telah terverifikasi dan booking terkonfirmasi. Email ini hanya
+   dikirim saat ambang pembayaran wajib pertama kali terpenuhi.
+3. Invoice yang sengaja diterbitkan dan dikirim oleh Front Office. Proforma,
+   receipt, refund note, dan rincian tagihan tetap dapat dibuat sebagai PDF,
+   tetapi tidak dikirim otomatis melalui email.
+
+Booking dibuat, payment reminder, payment rejected/voided, booking amended,
+cancelled/expired, pre-arrival, early/late request, dan event operasional lain
+tidak mengirim email customer. Statusnya tetap tersedia pada halaman `Cek
+Booking`, antarmuka staf, audit log, dan komunikasi WhatsApp manual bila perlu.
+
+Email reset password staf tetap tersedia sebagai email keamanan akun internal
+dan tidak dihitung sebagai email customer booking.
 
 Notifikasi marketing/promosi harus dipisahkan dari komunikasi transaksional dan memerlukan consent/preference tersendiri bila kelak digunakan.
 
@@ -199,11 +205,16 @@ Alert internal memiliki lifecycle `Open`, `Acknowledged`, `Resolved`, atau `Esca
 - Public booking memperoleh deadline 2 jam; policy same-day dapat menggunakan 1 jam.
 - Public booking tidak menawarkan deposit; amount required selalu 100% total resmi IDR. Deposit persentase/nominal tetap hanya dapat berasal dari admin-created manual booking.
 - Verified partial public payment tidak mengonfirmasi reservation; bila expiry terjadi, inventory dilepas tanpa menghapus payment/folio credit dan penyelesaiannya masuk workflow manual resmi.
-- Reminder lama dibatalkan setelah booking confirmed/cancelled/expired/amended.
+- Booking baru, reminder deadline, rejection, void, cancellation, dan expiry tidak
+  membuat email customer.
 - Bukti yang tercatat sebelum deadline membuat `Payment Review Hold`; expiry job tidak melepas inventory selama review.
 - Booking tanpa bukti pada deadline menjadi `Expired` dan inventory dilepas tepat sekali.
 - Booking expired tidak dapat dibayar/dihidupkan kembali tanpa availability check serta hold baru.
 - Satu event retry tidak menghasilkan email ganda.
+- Konfirmasi tidak dikirim ulang ketika pembayaran tambahan dicatat setelah
+  ambang pembayaran wajib sudah terpenuhi.
+- Dua email status pembayaran memakai template HTML KOOKA dan tetap memiliki
+  plain-text fallback; email dokumen menyertakan PDF.
 - WhatsApp manual tidak pernah diberi status `Delivered` atau `Read`.
 - Template dan dokumen mengikuti language snapshot serta menampilkan nilai resmi IDR.
 - Pesan dan provider log tidak memuat data highly sensitive.

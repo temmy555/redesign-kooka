@@ -155,6 +155,43 @@ export const reservations = pgTable(
   ],
 );
 
+/**
+ * Immutable bank choices offered when a reservation was created. A booking
+ * may show several active KOOKA accounts, while each row still references the
+ * versioned encrypted master record instead of copying sensitive account data.
+ */
+export const reservationPaymentInstructions = pgTable(
+  "reservation_payment_instructions",
+  {
+    reservationId: uuid("reservation_id")
+      .notNull()
+      .references(() => reservations.id, { onDelete: "restrict" }),
+    paymentInstructionVersionId: uuid("payment_instruction_version_id")
+      .notNull()
+      .references(() => paymentInstructionVersions.id, {
+        onDelete: "restrict",
+      }),
+    displayOrder: integer("display_order").notNull(),
+    ...appendOnlyColumns,
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.reservationId,
+        table.paymentInstructionVersionId,
+      ],
+    }),
+    uniqueIndex("uq_reservation_payment_instruction_order").on(
+      table.reservationId,
+      table.displayOrder,
+    ),
+    check(
+      "ck_reservation_payment_instruction_order",
+      sql`${table.displayOrder} > 0`,
+    ),
+  ],
+);
+
 export const reservationStatusEvents = pgTable(
   "reservation_status_events",
   {

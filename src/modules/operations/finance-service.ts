@@ -51,7 +51,7 @@ export async function getFolio(params: {
       ),
     )
     .limit(1);
-  if (!folio) throw new AppError("NOT_FOUND", "Folio not found");
+  if (!folio) throw new AppError("NOT_FOUND", "Data tagihan tidak ditemukan");
   const entries = await db
     .select()
     .from(folioEntries)
@@ -107,6 +107,77 @@ export async function getFolio(params: {
     balanceIdr: calculateLedgerBalance(entries),
     entries,
     documents,
+  };
+}
+
+type FinancialDocumentEntry = {
+  entryType: string;
+  category: string;
+  netAmountIdr: string | number;
+  discountAmountIdr: string | number;
+  serviceChargeAmountIdr: string | number;
+  taxAmountIdr: string | number;
+  totalAmountIdr: string | number;
+};
+
+export function summarizeFinancialDocumentEntries(
+  entries: readonly FinancialDocumentEntry[],
+) {
+  const isPayment = (entry: FinancialDocumentEntry) =>
+    entry.category === "PAYMENT" || entry.category === "PAYMENT_REVERSAL";
+  const isRefund = (entry: FinancialDocumentEntry) =>
+    entry.category === "REFUND";
+  const chargeEntries = entries.filter(
+    (entry) => !isPayment(entry) && !isRefund(entry),
+  );
+  const chargeSign = (entry: FinancialDocumentEntry) =>
+    entry.entryType === "DEBIT" ? 1 : -1;
+
+  const subtotalIdr = chargeEntries.reduce(
+    (sum, entry) => sum + chargeSign(entry) * Number(entry.netAmountIdr),
+    0,
+  );
+  const discountIdr = chargeEntries.reduce(
+    (sum, entry) => sum + chargeSign(entry) * Number(entry.discountAmountIdr),
+    0,
+  );
+  const serviceChargeIdr = chargeEntries.reduce(
+    (sum, entry) =>
+      sum + chargeSign(entry) * Number(entry.serviceChargeAmountIdr),
+    0,
+  );
+  const taxIdr = chargeEntries.reduce(
+    (sum, entry) => sum + chargeSign(entry) * Number(entry.taxAmountIdr),
+    0,
+  );
+  const chargeTotalIdr = chargeEntries.reduce(
+    (sum, entry) => sum + chargeSign(entry) * Number(entry.totalAmountIdr),
+    0,
+  );
+  const paymentsIdr = entries.reduce((sum, entry) => {
+    if (!isPayment(entry)) return sum;
+    return (
+      sum +
+      (entry.entryType === "CREDIT" ? 1 : -1) * Number(entry.totalAmountIdr)
+    );
+  }, 0);
+  const refundsIdr = entries.reduce((sum, entry) => {
+    if (!isRefund(entry)) return sum;
+    return (
+      sum +
+      (entry.entryType === "DEBIT" ? 1 : -1) * Number(entry.totalAmountIdr)
+    );
+  }, 0);
+
+  return {
+    subtotalIdr,
+    discountIdr,
+    serviceChargeIdr,
+    taxIdr,
+    chargeTotalIdr,
+    paymentsIdr,
+    refundsIdr,
+    balanceIdr: chargeTotalIdr - paymentsIdr + refundsIdr,
   };
 }
 
@@ -298,7 +369,7 @@ export async function postFolioEntry(params: {
     if (!Number.isFinite(value) || value < 0)
       throw new AppError(
         "VALIDATION_ERROR",
-        "Folio amounts must be non-negative numbers",
+        "Nominal tagihan tidak boleh bernilai negatif",
       );
   }
   if (params.quantity <= 0)
@@ -311,7 +382,7 @@ export async function postFolioEntry(params: {
   if (expected !== params.totalAmountIdr)
     throw new AppError(
       "VALIDATION_ERROR",
-      "Folio total does not match its price components",
+      "Total tagihan tidak sesuai dengan rincian harganya",
     );
   return withIdempotency(
     {
@@ -333,9 +404,10 @@ export async function postFolioEntry(params: {
         )
         .limit(1)
         .for("update");
-      if (!folio) throw new AppError("NOT_FOUND", "Folio not found");
+      if (!folio)
+        throw new AppError("NOT_FOUND", "Data tagihan tidak ditemukan");
       if (folio.status !== "OPEN")
-        throw new AppError("CONFLICT", "Folio is closed");
+        throw new AppError("CONFLICT", "Tagihan sudah ditutup");
       const [entry] = await tx
         .insert(folioEntries)
         .values({
@@ -427,7 +499,8 @@ export async function reverseFolioEntry(params: {
         )
         .limit(1)
         .for("update");
-      if (!original) throw new AppError("NOT_FOUND", "Folio entry not found");
+      if (!original)
+        throw new AppError("NOT_FOUND", "Rincian tagihan tidak ditemukan");
       const source = original.folio_entries;
       if (source.reversalOfEntryId)
         throw new AppError(
@@ -532,7 +605,8 @@ export async function issueFinancialDocument(params: {
         )
         .limit(1)
         .for("update");
-      if (!folio) throw new AppError("NOT_FOUND", "Folio not found");
+      if (!folio)
+        throw new AppError("NOT_FOUND", "Data tagihan tidak ditemukan");
       const [profile] = await tx
         .select({ id: documentProfileVersions.id })
         .from(documentProfileVersions)
@@ -573,7 +647,7 @@ export async function issueFinancialDocument(params: {
         if (!params.folioEntryIds?.length)
           throw new AppError(
             "VALIDATION_ERROR",
-            "Custom document scope requires folio entries",
+            "Cakupan dokumen khusus memerlukan rincian tagihan",
           );
         filters.push(inArray(folioEntries.id, params.folioEntryIds));
       }
@@ -583,7 +657,10 @@ export async function issueFinancialDocument(params: {
         .where(and(...filters))
         .orderBy(asc(folioEntries.serviceDate), asc(folioEntries.postedAt));
       if (!entries.length)
-        throw new AppError("CONFLICT", "Document scope has no folio entries");
+        throw new AppError(
+          "CONFLICT",
+          "Tidak ada rincian tagihan untuk cakupan dokumen ini",
+        );
       let supersededDocumentIds: string[] = [];
       if (params.documentType === "INVOICE") {
         const covered = await tx
@@ -652,38 +729,42 @@ export async function issueFinancialDocument(params: {
       const seq = sequence.rows[0];
       if (!seq) throw new Error("Failed to allocate document number");
       const documentNumber = `${seq.prefix}/${periodKey}/${String(seq.issuedValue).padStart(seq.padding, "0")}`;
-      const signed = (entry: (typeof entries)[number]) =>
-        entry.entryType === "DEBIT" ? 1 : -1;
-      const subtotalIdr = entries.reduce(
-        (sum, entry) => sum + signed(entry) * Number(entry.netAmountIdr),
-        0,
-      );
-      const discountIdr = entries.reduce(
-        (sum, entry) => sum + signed(entry) * Number(entry.discountAmountIdr),
-        0,
-      );
-      const serviceChargeIdr = entries.reduce(
-        (sum, entry) =>
-          sum + signed(entry) * Number(entry.serviceChargeAmountIdr),
-        0,
-      );
-      const taxIdr = entries.reduce(
-        (sum, entry) => sum + signed(entry) * Number(entry.taxAmountIdr),
-        0,
-      );
-      const totalIdr = entries.reduce(
-        (sum, entry) => sum + signed(entry) * Number(entry.totalAmountIdr),
-        0,
-      );
+      const summary = summarizeFinancialDocumentEntries(entries);
+      const {
+        subtotalIdr,
+        discountIdr,
+        serviceChargeIdr,
+        taxIdr,
+        chargeTotalIdr,
+        paymentsIdr,
+        refundsIdr,
+        balanceIdr,
+      } = summary;
       if (
-        [subtotalIdr, discountIdr, serviceChargeIdr, taxIdr, totalIdr].some(
-          (amount) => amount < 0,
-        )
+        [
+          subtotalIdr,
+          discountIdr,
+          serviceChargeIdr,
+          taxIdr,
+          chargeTotalIdr,
+        ].some((amount) => amount < -0.005)
       )
         throw new AppError(
           "CONFLICT",
-          "Document scope produces a negative total",
+          "Ringkasan tagihan tidak valid karena total biaya menjadi negatif",
         );
+      const totalIdr =
+        params.documentType === "RECEIPT"
+          ? paymentsIdr > 0
+            ? paymentsIdr
+            : Math.max(0, balanceIdr)
+          : params.documentType === "REFUND_NOTE"
+            ? refundsIdr > 0
+              ? refundsIdr
+              : Math.max(0, balanceIdr)
+            : params.documentType === "FOLIO_STATEMENT"
+              ? balanceIdr
+              : chargeTotalIdr;
       const [document] = await tx
         .insert(financialDocuments)
         .values({
@@ -717,6 +798,10 @@ export async function issueFinancialDocument(params: {
         discountIdr,
         serviceChargeIdr,
         taxIdr,
+        chargeTotalIdr,
+        paymentsIdr,
+        refundsIdr,
+        balanceIdr,
         totalIdr,
         entries: entries.map((entry) => ({
           id: entry.id,
@@ -786,7 +871,7 @@ export async function issueFinancialDocument(params: {
               },
               reason:
                 params.supersedeReason ??
-                "Invoice baru diterbitkan setelah perubahan folio",
+                "Invoice baru diterbitkan setelah perubahan tagihan",
               result: "SUCCESS",
             },
             tx,
@@ -801,7 +886,9 @@ export async function issueFinancialDocument(params: {
           payload: {
             documentId: document.id,
             versionId: version.id,
-            emailAfterRender: Boolean(params.recipientEmail),
+            emailAfterRender:
+              params.documentType === "INVOICE" &&
+              Boolean(params.recipientEmail),
           },
         },
         tx,
@@ -898,7 +985,7 @@ export async function allocatePayment(params: {
       )
         throw new AppError(
           "CONFLICT",
-          "Document and payment must belong to the same folio and be active",
+          "Dokumen dan pembayaran harus berasal dari tagihan aktif yang sama",
         );
       const prior = await tx
         .select({
@@ -992,7 +1079,8 @@ export async function requestManualRefund(params: {
         )
         .limit(1)
         .for("update");
-      if (!folio) throw new AppError("NOT_FOUND", "Folio not found");
+      if (!folio)
+        throw new AppError("NOT_FOUND", "Data tagihan tidak ditemukan");
       const codeResult = await tx.execute<{ code: string }>(
         sql`select concat('RF-', to_char(now() at time zone 'Asia/Jakarta', 'YYMMDD'), '-', upper(substr(replace(uuidv7()::text, '-', ''), 1, 10))) as code`,
       );

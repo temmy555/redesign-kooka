@@ -22,7 +22,7 @@ vi.mock("../../src/platform/idempotency", () => ({
 }));
 
 import {
-  createCsvReportExport,
+  createExcelReportExport,
   getOperationalDashboard,
   runDailyRollover,
   runReconciliation,
@@ -388,45 +388,49 @@ describe("Batch 6 reporting and daily operations services", () => {
     "FINANCIAL_LEDGER",
     "CLEANING",
     "RECONCILIATION",
-  ] as const)("exports a masked and audited %s CSV", async (reportCode) => {
-    const sourceRow =
-      reportCode === "BOOKINGS" || reportCode === "DAILY_OPERATIONS"
-        ? {
-            bookingCode: "KR-001",
-            guestName: "Budi Santoso",
-            checkInDate: "2026-08-01",
-          }
-        : { status: "OPEN", amountIdr: "500000" };
-    const tx = queuedDatabase({
-      executes: [[sourceRow]],
-      returns: [[{ id: U3 }]],
-    });
-    mocks.tx = tx;
-    const result = await createCsvReportExport({
-      propertyId: U2,
-      session,
-      idempotencyKey: `export-${reportCode}`,
-      reportCode,
-      rangeStart: "2026-08-01",
-      rangeEnd: "2026-08-02",
-    });
-    expect(result.filename).toContain(
-      reportCode.toLowerCase().replaceAll("_", "-"),
-    );
-    expect(result.rowCount).toBe(1);
-    if (reportCode === "BOOKINGS" || reportCode === "DAILY_OPERATIONS") {
-      expect(result.csv).toContain("B*** S***");
-      expect(result.csv).not.toContain("Budi Santoso");
-    }
-    expect(mocks.recordAuditEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "REPORT_EXPORTED" }),
-      tx,
-    );
-  });
+  ] as const)(
+    "exports a masked and audited %s Excel report",
+    async (reportCode) => {
+      const sourceRow =
+        reportCode === "BOOKINGS" || reportCode === "DAILY_OPERATIONS"
+          ? {
+              bookingCode: "KR-001",
+              guestName: "Budi Santoso",
+              checkInDate: "2026-08-01",
+            }
+          : { status: "OPEN", amountIdr: "500000" };
+      const tx = queuedDatabase({
+        executes: [[sourceRow]],
+        returns: [[{ id: U3 }]],
+      });
+      mocks.tx = tx;
+      const result = await createExcelReportExport({
+        propertyId: U2,
+        session,
+        idempotencyKey: `export-${reportCode}`,
+        reportCode,
+        rangeStart: "2026-08-01",
+        rangeEnd: "2026-08-02",
+      });
+      expect(result.filename).toContain(
+        reportCode.toLowerCase().replaceAll("_", "-"),
+      );
+      expect(result.rowCount).toBe(1);
+      expect(result.filename).toMatch(/\.xlsx$/u);
+      if (reportCode === "BOOKINGS" || reportCode === "DAILY_OPERATIONS") {
+        expect(result.rows.flat()).toContain("B*** S***");
+        expect(result.rows.flat()).not.toContain("Budi Santoso");
+      }
+      expect(mocks.recordAuditEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "REPORT_EXPORTED" }),
+        tx,
+      );
+    },
+  );
 
   it("guards export date range, row count, and missing metadata record", async () => {
     await expect(
-      createCsvReportExport({
+      createExcelReportExport({
         propertyId: U2,
         session,
         idempotencyKey: "wide",
@@ -445,7 +449,7 @@ describe("Batch 6 reporting and daily operations services", () => {
       ],
     });
     await expect(
-      createCsvReportExport({
+      createExcelReportExport({
         propertyId: U2,
         session,
         idempotencyKey: "large",
@@ -457,7 +461,7 @@ describe("Batch 6 reporting and daily operations services", () => {
 
     mocks.tx = queuedDatabase({ executes: [[]], returns: [[]] });
     await expect(
-      createCsvReportExport({
+      createExcelReportExport({
         propertyId: U2,
         session,
         idempotencyKey: "metadata-fail",

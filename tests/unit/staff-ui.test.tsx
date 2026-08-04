@@ -25,15 +25,17 @@ import {
 } from "../../app/staff/_components/FormControls";
 import FrontOfficeDesk, {
   assignableRooms,
+  bookingPaymentDescription,
   folioBookingDescription,
   human,
+  isActiveReservationRoom,
+  manualBookingDefaults,
 } from "../../app/staff/_components/FrontOfficeDesk";
 import RoomMonitor, {
   filterRooms,
   type RoomBoardData,
 } from "../../app/staff/_components/RoomMonitor";
 import { allowedNavigation } from "../../app/staff/_components/StaffShell";
-import TestGuide from "../../app/staff/_components/TestGuide";
 import { safeStaffDestination } from "../../app/staff/login/login-utils";
 
 const U1 = "11111111-1111-4111-a111-111111111111";
@@ -89,6 +91,8 @@ const roomBoard: RoomBoardData = {
       bookingCode: "KR-001",
       guestName: "Budi Santoso",
       nextArrivalAt: null,
+      nextArrivalBookingCode: null,
+      nextArrivalGuestName: null,
       updatedAt: "2026-08-02T01:00:00.000Z",
     },
     {
@@ -103,6 +107,8 @@ const roomBoard: RoomBoardData = {
       bookingCode: null,
       guestName: null,
       nextArrivalAt: "2026-08-02T07:00:00.000Z",
+      nextArrivalBookingCode: "KR-002",
+      nextArrivalGuestName: "Sari Wijaya",
       updatedAt: "2026-08-02T01:00:00.000Z",
     },
   ],
@@ -123,7 +129,7 @@ describe("Step 22A staff UI", () => {
   it("only renders navigation allowed by named permissions", () => {
     expect(
       allowedNavigation(["fnb.order.manage"]).map((item) => item.href),
-    ).toEqual(["/staff", "/staff/fnb", "/staff/test-guide"]);
+    ).toEqual(["/staff", "/staff/fnb"]);
     expect(
       allowedNavigation(["stay.manage", "housekeeping.task.manage"]).map(
         (item) => item.href,
@@ -133,24 +139,15 @@ describe("Step 22A staff UI", () => {
       "/staff/front-office",
       "/staff/rooms",
       "/staff/housekeeping",
-      "/staff/test-guide",
     ]);
     expect(
       allowedNavigation(["configuration.view", "identity.role.manage"]).map(
         (item) => item.href,
       ),
-    ).toEqual(["/staff", "/staff/admin", "/staff/test-guide"]);
+    ).toEqual(["/staff", "/staff/admin"]);
     expect(
       allowedNavigation(["attendance.self.view"]).map((item) => item.href),
-    ).toEqual(["/staff", "/staff/attendance", "/staff/test-guide"]);
-  });
-
-  it("renders the guided end-to-end UAT flow", () => {
-    const html = renderToStaticMarkup(<TestGuide />);
-    expect(html).toContain("Panduan test");
-    expect(html).toContain("Persiapan lingkungan dan master");
-    expect(html).toContain("Siapkan database UAT terpisah");
-    expect(html).toContain("Reset checklist lokal");
+    ).toEqual(["/staff", "/staff/attendance"]);
   });
 
   it("renders structured Batch 7 workspaces without a JSON editor", () => {
@@ -202,19 +199,61 @@ describe("Step 22A staff UI", () => {
     expect(human("DUE_IN")).toBe("due in");
   });
 
+  it("removes a checked-out room line from the active multi-room desk", () => {
+    expect(isActiveReservationRoom({ lineStatus: "ACTIVE" })).toBe(true);
+    expect(isActiveReservationRoom({ lineStatus: "COMPLETED" })).toBe(false);
+    expect(isActiveReservationRoom({ lineStatus: "CANCELLED" })).toBe(false);
+  });
+
+  it("resets every manual-booking field after a successful reservation", () => {
+    expect(manualBookingDefaults("2026-08-04")).toEqual({
+      checkInDate: "2026-08-04",
+      checkoutDate: "2026-08-05",
+      ratePlanCode: "",
+      rooms: [
+        {
+          roomTypeId: "",
+          adults: 1,
+          children: 0,
+          infants: 0,
+          extraBedQuantity: 0,
+        },
+      ],
+      bookerName: "",
+      bookerEmail: "",
+      bookerPhone: "",
+      paymentMode: "FULL",
+      depositValue: "",
+      notes: "",
+    });
+  });
+
   it("shows allocated physical room numbers in folio booking choices", () => {
     expect(
       folioBookingDescription({
         requiredPaymentIdr: "450000",
+        folioChargeTotalIdr: "999000",
+        verifiedPaymentIdr: "999000",
+        folioBalanceIdr: "0",
         rooms: [{ roomNumber: "10" }, { roomNumber: "2" }, { roomNumber: "2" }],
       }),
-    ).toContain("Kamar 2, 10");
+    ).toBe("Lunas Rp\u00a0999.000 · Kamar 2, 10");
     expect(
       folioBookingDescription({
         requiredPaymentIdr: "450000",
+        folioChargeTotalIdr: "999000",
+        verifiedPaymentIdr: "300000",
+        folioBalanceIdr: "699000",
         rooms: [{ roomNumber: null }],
       }),
-    ).toContain("Belum dialokasikan");
+    ).toBe("Sisa Rp\u00a0699.000 · Belum dialokasikan");
+    expect(
+      bookingPaymentDescription({
+        folioChargeTotalIdr: "999000",
+        verifiedPaymentIdr: "999000",
+        folioBalanceIdr: "0",
+      }),
+    ).toBe("Lunas · Dibayar Rp\u00a0999.000");
   });
 
   it("offers only compatible rooms that are free for the complete stay", () => {
@@ -259,6 +298,13 @@ describe("Step 22A staff UI", () => {
     const money = renderToStaticMarkup(
       <MoneyInput ariaLabel="Nominal IDR" onChange={vi.fn()} value="1500000" />,
     );
+    const databaseMoney = renderToStaticMarkup(
+      <MoneyInput
+        ariaLabel="Harga dari database"
+        onChange={vi.fn()}
+        value="450000.00"
+      />,
+    );
     const upload = renderToStaticMarkup(
       <FileField
         accept="image/jpeg"
@@ -271,6 +317,8 @@ describe("Step 22A staff UI", () => {
     expect(money).toContain("1.500.000");
     expect(money).toContain('inputMode="numeric"');
     expect(money).not.toContain('type="number"');
+    expect(databaseMoney).toContain("450.000");
+    expect(databaseMoney).not.toContain("45.000.000");
     expect(upload).toContain("Pilih file");
     expect(upload).toContain("Belum ada file dipilih");
     expect(fnb).not.toContain("<select");
@@ -297,6 +345,11 @@ describe("Step 22A staff UI", () => {
     expect(html).toContain("Budi Santoso");
     expect(html).toContain("KR-001");
     expect(html).toContain("500.000");
+    expect(html).toContain('href="/staff/rooms"');
+    expect(html).toContain('href="/staff/front-office?tab=stay"');
+    expect(html).toContain('href="/staff/front-office?tab=folio"');
+    expect(html).toContain("Proses kedatangan");
+    expect(html).toContain("Lihat tagihan dan pelunasan");
     expect(formatIdr(0)).toContain("Rp");
     expect(formatIdr(undefined)).toContain("0");
   });
@@ -344,7 +397,19 @@ describe("Step 22A staff UI", () => {
           },
         ],
         PAYMENT_REVIEW: [],
-        DEPARTURE: [],
+        DEPARTURE: [
+          {
+            queueType: "DEPARTURE",
+            entityId: "44444444-4444-4444-a444-444444444444",
+            bookingCode: "KR-OUTSTANDING",
+            roomNumber: "1",
+            guestName: "Tamu Belum Lunas",
+            status: "DUE_OUT",
+            scheduledAt: null,
+            amountIdr: "120000",
+            alert: "FOLIO_UNSETTLED",
+          },
+        ],
       },
       reconciliation: { openCount: 1, criticalCount: 1, exceptions: [] },
     };
@@ -352,7 +417,13 @@ describe("Step 22A staff UI", () => {
     expect(html).toContain("Tanpa nama");
     expect(html).toContain("Waktu belum ditentukan");
     expect(html).toContain("Waktu tidak valid");
-    expect(html).toContain("room unassigned");
+    expect(html).toContain("Kamar belum dialokasikan");
+    expect(html).toContain("Tagihan belum lunas");
+    expect(html).toContain("Sisa tagihan Rp");
+    expect(html).toContain("120.000");
+    expect(html).toContain(
+      "reservationRoomId=44444444-4444-4444-a444-444444444444",
+    );
   });
 
   it("renders physical rooms and filters operational conditions", () => {
@@ -365,12 +436,30 @@ describe("Step 22A staff UI", () => {
     );
     expect(html).toContain("Pantauan kamar");
     expect(html).toContain("Budi Santoso");
-    expect(html).toContain("Siap menerima tamu");
+    expect(html).toContain("Tamu berikutnya");
+    expect(html).toContain("Sari Wijaya");
+    expect(html).toContain("Booking KR-002");
     expect(html).not.toContain("Housekeeping</span>");
     expect(html).not.toContain("Service</span>");
     expect(filterRooms(roomBoard.rooms, "OCCUPIED")).toHaveLength(1);
     expect(filterRooms(roomBoard.rooms, "READY")).toHaveLength(1);
     expect(filterRooms(roomBoard.rooms, "ALL")).toHaveLength(2);
+  });
+
+  it("never labels an occupied room as empty when a guest name is missing", () => {
+    const occupiedWithoutName: RoomBoardData = {
+      ...roomBoard,
+      rooms: [{ ...roomBoard.rooms[0]!, guestName: null }],
+    };
+    const html = renderToStaticMarkup(
+      <RoomMonitor
+        canManageHousekeeping
+        canViewGuestDetails
+        initialData={occupiedWithoutName}
+      />,
+    );
+    expect(html).toContain("Tamu sedang menginap");
+    expect(html).not.toContain("Kamar kosong");
   });
 
   it("classifies cleaning, serviceability, and fallback room conditions", () => {

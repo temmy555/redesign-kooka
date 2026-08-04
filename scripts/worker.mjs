@@ -31,20 +31,83 @@ const MAX_DRAINED_PER_TICK = 50;
 async function main() {
   // UAT/production inject environment variables through systemd, Docker,
   // or the hosting control plane. Local files are a development fallback.
-  if (!process.env.DATABASE_URL || !process.env.REDIS_URL) {
+  if (!process.env.DATABASE_URL) {
     loadLocalApplicationEnvironment();
   }
   const environment = process.env;
   const tickIntervalMs = Number(environment.OUTBOX_TICK_INTERVAL_MS ?? 5_000);
   const rolloverHour = Number(environment.BUSINESS_DATE_ROLLOVER_HOUR ?? 4);
 
-  if (!environment.DATABASE_URL || !environment.REDIS_URL) {
-    throw new Error("DATABASE_URL and REDIS_URL must be set to run the worker");
+  if (!environment.DATABASE_URL) {
+    throw new Error("DATABASE_URL must be set to run the worker");
   }
 
   const pool = createDatabasePool(environment.DATABASE_URL, 4);
   const workerId = `outbox-worker-${process.pid}`;
   const handlers = createOutboxHandlers(environment, pool);
+
+  async function drainOutbox() {
+    for (let i = 0; i < MAX_DRAINED_PER_TICK; i += 1) {
+      const didWork = await processNextOutboxEvent(
+        pool,
+        workerId,
+        handlers,
+        console,
+      );
+      if (!didWork) break;
+    }
+  }
+
+  if (!environment.REDIS_URL) {
+    let isDraining = false;
+    let isRunningDailyOperations = false;
+    const outboxTimer = setInterval(() => {
+      if (isDraining) return;
+      isDraining = true;
+      void drainOutbox()
+        .catch((error) => {
+          console.error(
+            `[worker] outbox polling failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        })
+        .finally(() => {
+          isDraining = false;
+        });
+    }, tickIntervalMs);
+
+    const dailyOperationsTimer = setInterval(() => {
+      if (isRunningDailyOperations) return;
+      isRunningDailyOperations = true;
+      void runAutomaticDailyOperations(pool, new Date(), rolloverHour)
+        .catch((error) => {
+          console.error(
+            `[worker] daily operations failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        })
+        .finally(() => {
+          isRunningDailyOperations = false;
+        });
+    }, 60_000);
+
+    await drainOutbox();
+    await runAutomaticDailyOperations(pool, new Date(), rolloverHour);
+
+    console.log(
+      `[worker] ${workerId} started without Redis; polling outbox every ${tickIntervalMs}ms`,
+    );
+
+    const shutdown = async (signal) => {
+      console.log(`[worker] received ${signal}, shutting down`);
+      clearInterval(outboxTimer);
+      clearInterval(dailyOperationsTimer);
+      await pool.end();
+      process.exit(0);
+    };
+
+    process.on("SIGINT", () => void shutdown("SIGINT"));
+    process.on("SIGTERM", () => void shutdown("SIGTERM"));
+    return;
+  }
 
   const queueConnection = new IORedis(environment.REDIS_URL, {
     maxRetriesPerRequest: null,
@@ -79,15 +142,7 @@ async function main() {
         return;
       }
       if (job.name !== OUTBOX_TICK_JOB_NAME) return;
-      for (let i = 0; i < MAX_DRAINED_PER_TICK; i += 1) {
-        const didWork = await processNextOutboxEvent(
-          pool,
-          workerId,
-          handlers,
-          console,
-        );
-        if (!didWork) break;
-      }
+      await drainOutbox();
     },
     { connection: workerConnection },
   );

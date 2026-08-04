@@ -123,7 +123,7 @@ const baselineSections: LandingSection[] = [
         {
           question: "Kapan waktu check-in dan checkout?",
           answer:
-            "Check-in dimulai pukul 14.00 dan checkout paling lambat pukul 12.00. Permintaan waktu khusus dapat disampaikan sebelum kedatangan dan menyesuaikan kesiapan kamar.",
+            "Jadwal standar check-in pukul 14.00 dan checkout pukul 12.00. Waktu kedatangan lebih awal atau lebih malam dapat dibicarakan langsung dengan Front Office dan menyesuaikan kesiapan kamar.",
         },
         {
           question: "Apakah nomor kamar dapat dipilih saat booking?",
@@ -236,7 +236,7 @@ const englishByKey: Record<string, Record<string, unknown>> = {
       {
         question: "What are the check-in and checkout times?",
         answer:
-          "Check-in begins at 14:00 and checkout is by 12:00. Special timing requests may be shared before arrival and remain subject to room readiness.",
+          "Standard check-in is at 14:00 and checkout is at 12:00. Earlier or late-night arrivals can be arranged directly with Front Office, subject to room readiness.",
       },
       {
         question: "Can I choose a room number when booking?",

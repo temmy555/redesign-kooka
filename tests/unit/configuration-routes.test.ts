@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   createRatePlanDraft: vi.fn(),
   reviewCommercialVersion: vi.fn(),
   publishCommercialVersion: vi.fn(),
+  retireCommercialVersion: vi.fn(),
   resolveNightlyRate: vi.fn(),
   getPropertyConfigurationOverview: vi.fn(),
   updatePropertyProfile: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock("../../src/platform/authorization", async (importOriginal) => {
 vi.mock("../../src/modules/configuration/commercial-lifecycle", () => ({
   reviewCommercialVersion: mocks.reviewCommercialVersion,
   publishCommercialVersion: mocks.publishCommercialVersion,
+  retireCommercialVersion: mocks.retireCommercialVersion,
 }));
 vi.mock("../../src/modules/configuration/commercial-master", () => ({
   getCommercialMasterOverview: mocks.getCommercialMasterOverview,
@@ -276,6 +278,16 @@ describe("configuration admin routes", () => {
         reason: "Publish approved configuration",
       },
       "publishCommercialVersion",
+    ],
+    [
+      "RETIRE_VERSION",
+      {
+        action: "RETIRE_VERSION",
+        subject: "TAX_PROFILE",
+        versionId: U1,
+        reason: "No longer used",
+      },
+      "retireCommercialVersion",
     ],
     [
       "PREVIEW_RESOLVED_RATE",

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createExcelWorkbook } from "../../../src/platform/excel-workbook";
 import type { PaginationMeta } from "../../../src/platform/pagination";
 import { DateField } from "./FormControls";
 import PaginationControls from "./PaginationControls";
@@ -587,38 +586,8 @@ export default function AttendanceWorkspace({
       });
       return;
     }
-    const exportData = (await response.json()) as ReportData;
-    const workbook = createExcelWorkbook({
-      sheetName: "Laporan Absensi",
-      title: "Laporan Absensi KOOKA Residence",
-      subtitle: `Periode ${dateLabel(report.range.start)} sampai ${dateLabel(report.range.end)}`,
-      headers: [
-        "Tanggal",
-        "Kode karyawan",
-        "Karyawan",
-        "Masuk",
-        "Keluar",
-        "Durasi (menit)",
-        "Lokasi",
-        "Status",
-      ],
-      rows: exportData.rows.map((row) => [
-        row.businessDate,
-        row.employeeCode,
-        row.employeeName,
-        timeLabel(row.checkedInAt),
-        timeLabel(row.checkedOutAt),
-        row.durationMinutes,
-        row.locationName,
-        row.status,
-      ]),
-      columnWidths: [14, 18, 28, 12, 12, 16, 28, 20],
-    });
-    const url = URL.createObjectURL(
-      new Blob([workbook], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      }),
-    );
+    const workbook = await response.blob();
+    const url = URL.createObjectURL(workbook);
     const link = document.createElement("a");
     link.href = url;
     link.download = `laporan-absensi-${report.range.start}-${report.range.end}.xlsx`;

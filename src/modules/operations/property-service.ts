@@ -933,7 +933,10 @@ export async function assessDamage(params: {
           .where(eq(folios.reservationId, params.reservationId))
           .limit(1);
         if (!folio)
-          throw new AppError("CONFLICT", "Reservation folio is missing");
+          throw new AppError(
+            "CONFLICT",
+            "Data tagihan booking tidak ditemukan",
+          );
         const [entry] = await tx
           .insert(folioEntries)
           .values({

@@ -9,7 +9,7 @@ Dokumen ini menjelaskan implementasi Roadmap Langkah 21. Seluruh endpoint hanya 
 - IDR adalah currency laporan resmi. Revenue, verified payment, refund, dan outstanding ditampilkan terpisah agar tidak dianggap nilai yang sama.
 - Rollover tidak memposting room charge, mengakui revenue, memperbaiki folio/inventory otomatis, atau melepaskan guaranteed booking/no-show.
 - Reconciliation exception adalah daftar pekerjaan untuk menyelesaikan masalah pada sumbernya, bukan ledger atau inventory kedua.
-- Export CSV menyamarkan nama tamu, tidak memuat email/telepon/KTP/tanda tangan/destination refund, mencegah formula injection, dibatasi 10.000 baris, dan tidak boleh di-cache.
+- Export Excel menyamarkan nama tamu, tidak memuat email/telepon/KTP/tanda tangan/destination refund, dibatasi 10.000 baris, dan tidak boleh di-cache.
 
 ## Permission
 
@@ -76,18 +76,18 @@ Pemeriksaan awal mencakup inventory overclaim, verified payment tanpa folio post
 
 Transition: `ACKNOWLEDGE`, `INVESTIGATE`, `RESOLVE`, atau `ACCEPT_WITH_REASON`. Dua transition penutup wajib mempunyai reason. Masalah yang terdeteksi lagi setelah ditutup dibuka kembali dengan fingerprint yang sama dan occurrence count bertambah.
 
-### Export CSV
+### Export Excel
 
 ```json
 {
-  "action": "EXPORT_CSV",
+  "action": "EXPORT_EXCEL",
   "reportCode": "BOOKINGS",
   "rangeStart": "2026-08-01",
   "rangeEnd": "2026-08-31"
 }
 ```
 
-`reportCode`: `DAILY_OPERATIONS`, `BOOKINGS`, `FINANCIAL_LEDGER`, `CLEANING`, atau `RECONCILIATION`. Rentang maksimal 366 hari. Response langsung berupa `text/csv` dengan `Cache-Control: private, no-store`, export ID, row count, expiry 15 menit, metadata filter/version, dan audit event. Retry dengan idempotency key yang sama mengembalikan snapshot CSV yang sama.
+`reportCode`: `DAILY_OPERATIONS`, `BOOKINGS`, `FINANCIAL_LEDGER`, `CLEANING`, atau `RECONCILIATION`. Rentang maksimal 366 hari. Response langsung berupa workbook `.xlsx` dengan `Cache-Control: private, no-store`, export ID, row count, expiry 15 menit, metadata filter/version, dan audit event. Retry dengan idempotency key yang sama menggunakan snapshot data laporan yang sama.
 
 ## Exit gate operasional
 

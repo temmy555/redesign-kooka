@@ -178,6 +178,7 @@ USD dan AUD hanya preference tampilan. Semua quote menyimpan official IDR dan op
 | Tabel                       | Tujuan/column penting                                                                                                                           |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reservations`              | Booking header: booking code, source, status, booker, dates summary, language/currency preference, payment deadline, policy snapshots, version. |
+| `reservation_payment_instructions` | Immutable ordered list of every active property bank-instruction version offered when the reservation was created. |
 | `reservation_rooms`         | Satu row untuk setiap kamar yang dipesan, walaupun tipenya sama; booked room type, fulfilled room type, guest count, extra bed, line status.    |
 | `reservation_room_nights`   | Satu row per reservation room dan stay date; IDR rate/tax/service/discount snapshot.                                                            |
 | `reservation_status_events` | Append-only transition/action, from/to, actor, reason, correlation ID, guard result.                                                            |

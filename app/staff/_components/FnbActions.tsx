@@ -3,6 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import {
+  foodOrderStatusLabel,
+  nextSimpleFoodOrderAction,
+  nextSimpleFoodOrderStatus,
+} from "../../../src/modules/commerce/fnb-status";
 import { KookaSelect, MoneyInput, ReasonDialog } from "./FormControls";
 import StaffNotice from "./StaffNotice";
 import styles from "../staff.module.css";
@@ -60,14 +65,6 @@ type StandalonePaymentResult = {
   receiptId: string;
   receiptCode: string;
   amountIdr: number;
-};
-
-const nextOrderStatus: Record<string, string | undefined> = {
-  ENTERED: "ACCEPTED",
-  ACCEPTED: "PREPARING",
-  PREPARING: "READY",
-  READY: "SERVED",
-  SERVED: "COMPLETED",
 };
 
 export default function FnbActions({ orders }: { orders: Order[] }) {
@@ -339,7 +336,8 @@ export default function FnbActions({ orders }: { orders: Order[] }) {
           Number(selectedPaymentOrder.paidAmountIdr),
       )
     : 0;
-  const status = nextOrderStatus[selectedOrder?.status ?? ""] ?? "";
+  const status = nextSimpleFoodOrderStatus(selectedOrder?.status ?? "") ?? "";
+  const statusAction = nextSimpleFoodOrderAction(selectedOrder?.status ?? "");
   return (
     <div className={styles.actionGrid}>
       <StaffNotice notice={notice} onDismiss={() => setNotice(null)} />
@@ -366,7 +364,7 @@ export default function FnbActions({ orders }: { orders: Order[] }) {
                   {
                     value: "ROOM_CHARGE",
                     label: "Bebankan ke kamar",
-                    description: "Masuk ke folio tamu yang sedang menginap",
+                    description: "Masuk ke tagihan tamu yang sedang menginap",
                   },
                   {
                     value: "STANDALONE",
@@ -555,7 +553,7 @@ export default function FnbActions({ orders }: { orders: Order[] }) {
       </section>
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
-          <h2>Update status pesanan</h2>
+          <h2>Proses pesanan</h2>
         </div>
         <form className={styles.staffForm} onSubmit={transition}>
           <label>
@@ -566,35 +564,34 @@ export default function FnbActions({ orders }: { orders: Order[] }) {
               onChange={setOrderId}
               options={orders
                 .filter(
-                  (order) => !["COMPLETED", "CANCELLED"].includes(order.status),
+                  (order) =>
+                    !["SERVED", "COMPLETED", "CANCELLED"].includes(
+                      order.status,
+                    ),
                 )
                 .map((order) => ({
                   value: order.id,
                   label: `${order.orderCode} — ${order.customerName ?? "Customer"}`,
-                  description: `${order.status.replaceAll("_", " ")} · Rp${Number(order.orderTotalIdr).toLocaleString("id-ID")}`,
+                  description: `${foodOrderStatusLabel(order.status)} · Rp${Number(order.orderTotalIdr).toLocaleString("id-ID")}`,
                 }))}
               placeholder="Pilih pesanan"
               emptyMessage="Tidak ada pesanan aktif."
             />
           </label>
-          <label>
-            Status
-            <KookaSelect
-              ariaLabel="Status baru pesanan"
-              value={status}
-              onChange={() => undefined}
-              options={
-                status
-                  ? [{ value: status, label: status.replaceAll("_", " ") }]
-                  : []
-              }
-              placeholder="Pilih pesanan terlebih dahulu"
-            />
-          </label>
+          <div className={styles.generatedOrderCode}>
+            <span>Status saat ini</span>
+            <strong>
+              {selectedOrder
+                ? foodOrderStatusLabel(selectedOrder.status)
+                : "Pilih pesanan terlebih dahulu"}
+            </strong>
+            <small>
+              {statusAction || "Pesanan ini tidak memerlukan proses lanjutan."}
+            </small>
+          </div>
           <div className={styles.formActions}>
             <button className={styles.primaryButton} disabled={!status}>
-              Lanjut ke{" "}
-              {status ? status.replaceAll("_", " ") : "status berikutnya"}
+              {statusAction || "Pilih pesanan"}
             </button>
             <button
               className={styles.secondaryButton}

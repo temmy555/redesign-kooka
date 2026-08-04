@@ -15,6 +15,7 @@ import SignaturePad from "./SignaturePad";
 import StaffNotice from "./StaffNotice";
 import PaginationControls from "./PaginationControls";
 import type { PaginationMeta } from "../../../src/platform/pagination";
+import { toJakartaDateString } from "../../../src/platform/clock";
 import styles from "../staff.module.css";
 
 type RoomLine = {
@@ -51,6 +52,9 @@ type Booking = {
   requiredPaymentIdr: string;
   paymentDeadlineAt: string | null;
   folioId: string | null;
+  folioBalanceIdr: string;
+  folioChargeTotalIdr: string;
+  verifiedPaymentIdr: string;
   rooms: RoomLine[];
 };
 
@@ -138,6 +142,12 @@ type Commercial = {
     lifecycleStatus: string | null;
     sourceEligibility?: string;
   }>;
+  paymentInstructions: Array<{
+    paymentInstructionVersionId: string;
+    bankName: string;
+    accountHolder: string;
+    accountNumberLast4: string;
+  }>;
 };
 
 type QuoteRoom = {
@@ -147,6 +157,29 @@ type QuoteRoom = {
   infants: number;
   extraBedQuantity: number;
 };
+
+export function manualBookingDefaults(today: string) {
+  return {
+    checkInDate: today,
+    checkoutDate: nextDate(today),
+    ratePlanCode: "",
+    rooms: [
+      {
+        roomTypeId: "",
+        adults: 1,
+        children: 0,
+        infants: 0,
+        extraBedQuantity: 0,
+      },
+    ] satisfies QuoteRoom[],
+    bookerName: "",
+    bookerEmail: "",
+    bookerPhone: "",
+    paymentMode: "FULL",
+    depositValue: "",
+    notes: "",
+  };
+}
 
 type Notice = { tone: "success" | "error"; message: string } | null;
 
@@ -190,7 +223,10 @@ function formatIdr(value: string | number) {
 }
 
 export function folioBookingDescription(booking: {
-  requiredPaymentIdr: string | number;
+  requiredPaymentIdr?: string | number;
+  folioBalanceIdr?: string | number;
+  folioChargeTotalIdr?: string | number;
+  verifiedPaymentIdr?: string | number;
   rooms: Array<{ roomNumber?: string | null }>;
 }) {
   const roomNumbers = Array.from(
@@ -205,7 +241,28 @@ export function folioBookingDescription(booking: {
   const allocation = roomNumbers.length
     ? `Kamar ${roomNumbers.join(", ")}`
     : "Belum dialokasikan";
-  return `${formatIdr(booking.requiredPaymentIdr)} · ${allocation}`;
+  const chargeTotal = Number(
+    booking.folioChargeTotalIdr ?? booking.requiredPaymentIdr ?? 0,
+  );
+  const paid = Number(booking.verifiedPaymentIdr ?? 0);
+  const balance = Number(booking.folioBalanceIdr ?? chargeTotal - paid);
+  const payment =
+    Math.abs(balance) < 0.5
+      ? `Lunas ${formatIdr(paid || chargeTotal)}`
+      : `Sisa ${formatIdr(Math.max(0, balance))}`;
+  return `${payment} · ${allocation}`;
+}
+
+export function bookingPaymentDescription(booking: {
+  folioBalanceIdr: string | number;
+  folioChargeTotalIdr: string | number;
+  verifiedPaymentIdr: string | number;
+}) {
+  const balance = Number(booking.folioBalanceIdr);
+  const paid = Number(booking.verifiedPaymentIdr);
+  if (Math.abs(balance) < 0.5) return `Lunas · Dibayar ${formatIdr(paid)}`;
+  if (balance < 0) return `Kelebihan bayar ${formatIdr(Math.abs(balance))}`;
+  return `Dibayar ${formatIdr(paid)} · Sisa ${formatIdr(balance)}`;
 }
 
 export function human(
@@ -215,6 +272,10 @@ export function human(
   return value
     ? value.replaceAll("_", " ").toLocaleLowerCase("id-ID")
     : fallback;
+}
+
+export function isActiveReservationRoom(room: { lineStatus: string }) {
+  return room.lineStatus === "ACTIVE";
 }
 
 function captureLabel(value: string) {
@@ -227,8 +288,20 @@ function captureLabel(value: string) {
   );
 }
 
-export default function FrontOfficeDesk() {
-  const [active, setActive] = useState("booking");
+export default function FrontOfficeDesk({
+  initialReservationRoomId = "",
+  initialStayAction = "CHECK_IN",
+  initialTab = "booking",
+}: {
+  initialReservationRoomId?: string;
+  initialStayAction?: string;
+  initialTab?: string;
+}) {
+  const [active, setActive] = useState(
+    ["booking", "payment", "stay", "folio"].includes(initialTab)
+      ? initialTab
+      : "booking",
+  );
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [bookingRows, setBookingRows] = useState<Booking[]>([]);
@@ -253,7 +326,10 @@ export default function FrontOfficeDesk() {
     roomTypes: [],
     roomUnits: [],
   });
-  const [commercial, setCommercial] = useState<Commercial>({ ratePlans: [] });
+  const [commercial, setCommercial] = useState<Commercial>({
+    ratePlans: [],
+    paymentInstructions: [],
+  });
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -312,7 +388,11 @@ export default function FrontOfficeDesk() {
       setRoomMaster(
         catalogData.roomTypes ? catalogData : { roomTypes: [], roomUnits: [] },
       );
-      setCommercial(catalogData.ratePlans ? catalogData : { ratePlans: [] });
+      setCommercial(
+        catalogData.ratePlans
+          ? catalogData
+          : { ratePlans: [], paymentInstructions: [] },
+      );
     } catch {
       setNotice({ tone: "error", message: "Data Front Office gagal dimuat." });
     } finally {
@@ -371,9 +451,13 @@ export default function FrontOfficeDesk() {
 
   const stays = useMemo(
     () =>
-      bookings.flatMap((booking) =>
-        booking.rooms.map((room) => ({ booking, room })),
-      ),
+      bookings
+        .filter((booking) => booking.status !== "COMPLETED")
+        .flatMap((booking) =>
+          booking.rooms
+            .filter(isActiveReservationRoom)
+            .map((room) => ({ booking, room })),
+        ),
     [bookings],
   );
 
@@ -402,7 +486,8 @@ export default function FrontOfficeDesk() {
           <strong>
             {
               bookings.filter(
-                (item) => !["CANCELLED", "EXPIRED"].includes(item.status),
+                (item) =>
+                  !["CANCELLED", "EXPIRED", "COMPLETED"].includes(item.status),
               ).length
             }
           </strong>
@@ -440,7 +525,7 @@ export default function FrontOfficeDesk() {
           ["booking", "Booking"],
           ["payment", "Pembayaran"],
           ["stay", "Check-in & kamar"],
-          ["folio", "Folio & dokumen"],
+          ["folio", "Tagihan & dokumen"],
         ].map(([key, label]) => (
           <button
             aria-current={active === key ? "page" : undefined}
@@ -471,6 +556,7 @@ export default function FrontOfficeDesk() {
       {active === "payment" ? (
         <PaymentPanel
           bookings={bookings}
+          paymentInstructions={commercial.paymentInstructions ?? []}
           loadPaymentPage={loadPaymentPage}
           onChanged={load}
           paymentPagination={paymentPagination}
@@ -481,7 +567,10 @@ export default function FrontOfficeDesk() {
       ) : null}
       {active === "stay" ? (
         <StayPanel
+          initialReservationRoomId={initialReservationRoomId}
+          initialStayAction={initialStayAction}
           onChanged={load}
+          onOpenPayment={() => setActive("payment")}
           roomMaster={roomMaster}
           setNotice={setNotice}
           stays={stays}
@@ -520,21 +609,35 @@ function BookingPanel({
   roomMaster: RoomMaster;
   setNotice: (notice: Notice) => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const [checkInDate, setCheckInDate] = useState(today);
-  const [checkoutDate, setCheckoutDate] = useState(nextDate(today));
-  const [ratePlanCode, setRatePlanCode] = useState("");
-  const [rooms, setRooms] = useState<QuoteRoom[]>([
-    { roomTypeId: "", adults: 1, children: 0, infants: 0, extraBedQuantity: 0 },
-  ]);
+  const today = toJakartaDateString();
+  const defaults = manualBookingDefaults(today);
+  const [checkInDate, setCheckInDate] = useState(defaults.checkInDate);
+  const [checkoutDate, setCheckoutDate] = useState(defaults.checkoutDate);
+  const [ratePlanCode, setRatePlanCode] = useState(defaults.ratePlanCode);
+  const [rooms, setRooms] = useState<QuoteRoom[]>(defaults.rooms);
   const [quote, setQuote] = useState<Record<string, unknown> | null>(null);
-  const [bookerName, setBookerName] = useState("");
-  const [bookerEmail, setBookerEmail] = useState("");
-  const [bookerPhone, setBookerPhone] = useState("");
-  const [paymentMode, setPaymentMode] = useState("FULL");
-  const [depositValue, setDepositValue] = useState("");
-  const [notes, setNotes] = useState("");
+  const [bookerName, setBookerName] = useState(defaults.bookerName);
+  const [bookerEmail, setBookerEmail] = useState(defaults.bookerEmail);
+  const [bookerPhone, setBookerPhone] = useState(defaults.bookerPhone);
+  const [paymentMode, setPaymentMode] = useState(defaults.paymentMode);
+  const [depositValue, setDepositValue] = useState(defaults.depositValue);
+  const [notes, setNotes] = useState(defaults.notes);
   const [busy, setBusy] = useState(false);
+
+  function resetManualBookingForm() {
+    const nextDefaults = manualBookingDefaults(toJakartaDateString());
+    setCheckInDate(nextDefaults.checkInDate);
+    setCheckoutDate(nextDefaults.checkoutDate);
+    setRatePlanCode(nextDefaults.ratePlanCode);
+    setRooms(nextDefaults.rooms);
+    setQuote(null);
+    setBookerName(nextDefaults.bookerName);
+    setBookerEmail(nextDefaults.bookerEmail);
+    setBookerPhone(nextDefaults.bookerPhone);
+    setPaymentMode(nextDefaults.paymentMode);
+    setDepositValue(nextDefaults.depositValue);
+    setNotes(nextDefaults.notes);
+  }
 
   function updateRoom(index: number, patch: Partial<QuoteRoom>) {
     setRooms((current) =>
@@ -605,12 +708,17 @@ function BookingPanel({
         depositValue: depositValue ? Number(depositValue) : null,
         acknowledgedPolicyVersionIds: [],
       });
-      setQuote(null);
+      resetManualBookingForm();
       setNotice({
         tone: "success",
         message: `Booking ${String(result.bookingCode ?? "baru")} berhasil dibuat.`,
       });
-      await onChanged();
+      await onChanged().catch(() => {
+        setNotice({
+          tone: "success",
+          message: `Booking ${String(result.bookingCode ?? "baru")} berhasil dibuat. Daftar booking belum dapat diperbarui otomatis; silakan muat ulang halaman.`,
+        });
+      });
     } catch (error) {
       setNotice({
         tone: "error",
@@ -1018,9 +1126,9 @@ function BookingTable({
                   <small>{booking.rooms.length} kamar</small>
                 </td>
                 <td>
-                  {formatIdr(booking.requiredPaymentIdr)}
+                  {formatIdr(booking.folioChargeTotalIdr)}
                   <br />
-                  <small>{human(booking.paymentMode)}</small>
+                  <small>{bookingPaymentDescription(booking)}</small>
                 </td>
                 <td>
                   <span className={styles.statusPill}>
@@ -1076,6 +1184,7 @@ function BookingTable({
 
 function PaymentPanel({
   bookings,
+  paymentInstructions,
   loadPaymentPage,
   paymentPagination,
   paymentRows,
@@ -1084,6 +1193,7 @@ function PaymentPanel({
   onChanged,
 }: {
   bookings: Booking[];
+  paymentInstructions: Commercial["paymentInstructions"];
   loadPaymentPage: (
     page: number,
     pageSize: number,
@@ -1099,6 +1209,8 @@ function PaymentPanel({
   const [reservationId, setReservationId] = useState("");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("BANK_TRANSFER");
+  const [paymentInstructionVersionId, setPaymentInstructionVersionId] =
+    useState("");
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
   const [reviewTarget, setReviewTarget] = useState<{
@@ -1135,12 +1247,21 @@ function PaymentPanel({
       });
       return;
     }
+    if (method === "BANK_TRANSFER" && !paymentInstructionVersionId) {
+      setNotice({
+        tone: "error",
+        message: "Pilih rekening KOOKA yang menerima transfer.",
+      });
+      return;
+    }
     try {
       await mutate("/api/staff/payments", {
         action: "RECORD_FOR_REVIEW",
         reservationId,
         amountIdr: Number(amount),
         method,
+        paymentInstructionVersionId:
+          method === "BANK_TRANSFER" ? paymentInstructionVersionId : null,
         receivedAt: new Date().toISOString(),
         reference: reference || null,
         notes: notes || null,
@@ -1196,7 +1317,14 @@ function PaymentPanel({
             <span>Booking</span>
             <KookaSelect
               ariaLabel="Booking untuk pembayaran"
-              onChange={setReservationId}
+              onChange={(value) => {
+                setReservationId(value);
+                const booking = bookings.find((item) => item.id === value);
+                if (booking && Number(booking.folioBalanceIdr) > 0)
+                  setAmount(
+                    String(Math.round(Number(booking.folioBalanceIdr))),
+                  );
+              }}
               options={bookings
                 .filter(
                   (booking) =>
@@ -1205,7 +1333,7 @@ function PaymentPanel({
                 .map((booking) => ({
                   value: booking.id,
                   label: `${booking.bookingCode} — ${booking.bookerName}`,
-                  description: human(booking.status),
+                  description: `${human(booking.status)} · Saldo ${formatIdr(booking.folioBalanceIdr)}`,
                 }))}
               placeholder="Pilih booking"
               value={reservationId}
@@ -1236,6 +1364,22 @@ function PaymentPanel({
                 value={method}
               />
             </div>
+            {method === "BANK_TRANSFER" ? (
+              <div className={styles.fieldGroup}>
+                <span>Rekening penerima</span>
+                <KookaSelect
+                  ariaLabel="Rekening KOOKA penerima transfer"
+                  onChange={setPaymentInstructionVersionId}
+                  options={paymentInstructions.map((instruction) => ({
+                    value: instruction.paymentInstructionVersionId,
+                    label: instruction.bankName,
+                    description: `${instruction.accountHolder} · berakhir ${instruction.accountNumberLast4}`,
+                  }))}
+                  placeholder="Pilih rekening penerima"
+                  value={paymentInstructionVersionId}
+                />
+              </div>
+            ) : null}
             <label>
               Referensi
               <input
@@ -1425,18 +1569,32 @@ function PaymentPanel({
 }
 
 function StayPanel({
+  initialReservationRoomId,
+  initialStayAction,
   stays,
   roomMaster,
   setNotice,
   onChanged,
+  onOpenPayment,
 }: {
+  initialReservationRoomId: string;
+  initialStayAction: string;
   stays: Array<{ booking: Booking; room: RoomLine }>;
   roomMaster: RoomMaster;
   setNotice: (notice: Notice) => void;
   onChanged: () => Promise<void>;
+  onOpenPayment: () => void;
 }) {
-  const [reservationRoomId, setReservationRoomId] = useState("");
-  const [action, setAction] = useState("CHECK_IN");
+  const [reservationRoomId, setReservationRoomId] = useState(
+    initialReservationRoomId,
+  );
+  const [action, setAction] = useState(
+    ["CHECK_IN", "CHECK_OUT", "MARK_NO_SHOW", "RELEASE_NO_SHOW"].includes(
+      initialStayAction,
+    )
+      ? initialStayAction
+      : "CHECK_IN",
+  );
   const [stayReason, setStayReason] = useState("");
   const [captureReason, setCaptureReason] = useState("");
   const [captureType, setCaptureType] = useState("IDENTITY_DOCUMENT");
@@ -1453,11 +1611,9 @@ function StayPanel({
   const [priceTreatment, setPriceTreatment] = useState("NO_CHANGE");
   const [adjustment, setAdjustment] = useState("0");
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
-  const [blockStartsOn, setBlockStartsOn] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [blockStartsOn, setBlockStartsOn] = useState(toJakartaDateString());
   const [blockEndsOn, setBlockEndsOn] = useState(
-    nextDate(new Date().toISOString().slice(0, 10)),
+    nextDate(toJakartaDateString()),
   );
   const selected = stays.find(
     ({ room }) => room.reservationRoomId === reservationRoomId,
@@ -1469,10 +1625,21 @@ function StayPanel({
   const selectedRoomUnit = roomMaster.roomUnits.find(
     (roomUnit) => roomUnit.id === selected?.room.roomUnitId,
   );
-  const compatibleRooms = assignableRooms(
+  const allocationRooms = assignableRooms(
     roomMaster,
     selected?.room.roomTypeId,
     selected?.room.checkInDate,
+    selected?.room.checkoutDate,
+  );
+  const jakartaToday = toJakartaDateString();
+  const moveEffectiveOn =
+    selected?.room.checkInDate && selected.room.checkInDate > jakartaToday
+      ? selected.room.checkInDate
+      : jakartaToday;
+  const moveRooms = assignableRooms(
+    roomMaster,
+    selected?.room.roomTypeId,
+    moveEffectiveOn,
     selected?.room.checkoutDate,
   );
   async function transition(event: React.FormEvent) {
@@ -1559,7 +1726,7 @@ function StayPanel({
         action: "MOVE",
         roomStayId: selectedRoomStayId,
         toRoomUnitId: moveRoomUnitId,
-        effectiveOn: new Date().toISOString().slice(0, 10),
+        effectiveOn: moveEffectiveOn,
         reason: moveReason,
         priceTreatment,
         priceAdjustmentIdr: Number(adjustment),
@@ -1636,6 +1803,16 @@ function StayPanel({
               ariaLabel="Booking atau kamar yang sedang diinapkan"
               onChange={(value) => {
                 setReservationRoomId(value);
+                const nextStay = stays.find(
+                  ({ room }) => room.reservationRoomId === value,
+                );
+                setAction(
+                  ["IN_HOUSE", "DUE_OUT"].includes(
+                    nextStay?.room.stayStatus ?? "",
+                  )
+                    ? "CHECK_OUT"
+                    : "CHECK_IN",
+                );
                 setAllocationRoomUnitId("");
                 setAllocationReason("");
                 setMoveRoomUnitId("");
@@ -1687,6 +1864,18 @@ function StayPanel({
                       : "Belum ada data"}
                   </strong>
                 </span>
+                <span>
+                  Sisa tagihan
+                  <strong
+                    className={
+                      Number(selected.booking.folioBalanceIdr) > 0
+                        ? styles.balanceOutstanding
+                        : styles.balanceSettled
+                    }
+                  >
+                    {formatIdr(selected.booking.folioBalanceIdr)}
+                  </strong>
+                </span>
               </div>
             ) : null}
           </div>
@@ -1732,12 +1921,32 @@ function StayPanel({
             disabled={
               !selectedRoomStayId ||
               !selected?.room.roomUnitId ||
-              stayReason.trim().length < 3
+              stayReason.trim().length < 3 ||
+              (action === "CHECK_OUT" &&
+                Math.abs(Number(selected?.booking.folioBalanceIdr ?? 0)) >= 0.5)
             }
             type="submit"
           >
             Proses status
           </button>
+          {action === "CHECK_OUT" &&
+          Math.abs(Number(selected?.booking.folioBalanceIdr ?? 0)) >= 0.5 ? (
+            <div className={styles.checkoutBalanceWarning}>
+              <strong>Checkout belum dapat dilakukan</strong>
+              <span>
+                Sisa tagihan masih{" "}
+                {formatIdr(selected?.booking.folioBalanceIdr ?? 0)}. Catat
+                pelunasan, lalu verifikasi pembayarannya sebelum checkout.
+              </span>
+              <button
+                className={styles.secondaryButton}
+                type="button"
+                onClick={onOpenPayment}
+              >
+                Buka pembayaran
+              </button>
+            </div>
+          ) : null}
         </form>
       </section>
       <section className={styles.formCard}>
@@ -1917,7 +2126,7 @@ function StayPanel({
                 ariaLabel="Nomor kamar untuk alokasi pertama"
                 emptyMessage="Tidak ada nomor kamar dengan tipe yang sesuai."
                 onChange={setAllocationRoomUnitId}
-                options={compatibleRooms.map((room) => ({
+                options={allocationRooms.map((room) => ({
                   value: room.id,
                   label: `Kamar ${room.roomNumber}`,
                   description: [
@@ -1972,7 +2181,7 @@ function StayPanel({
                 ariaLabel="Kamar tujuan pindah"
                 emptyMessage="Tidak ada kamar kompatibel yang tersedia."
                 onChange={setMoveRoomUnitId}
-                options={compatibleRooms
+                options={moveRooms
                   .filter((room) => room.id !== selected.room.roomUnitId)
                   .map((room) => ({
                     value: room.id,
@@ -2086,7 +2295,7 @@ function StayPanel({
               !maintenanceRoomUnitId || maintenanceReason.trim().length < 3
             }
             onClick={() => {
-              const today = new Date().toISOString().slice(0, 10);
+              const today = toJakartaDateString();
               setBlockStartsOn(today);
               setBlockEndsOn(nextDate(today));
               setBlockDialogOpen(true);
@@ -2289,7 +2498,10 @@ function FolioPanel({
         documentType,
         scope,
         recipientName,
-        recipientEmail: recipientEmail || undefined,
+        recipientEmail:
+          documentType === "INVOICE" && recipientEmail
+            ? recipientEmail
+            : undefined,
         language: "id",
       });
       const documentId = String(result.documentId ?? "");
@@ -2357,11 +2569,12 @@ function FolioPanel({
         decision: "APPROVED",
         amountIdr: Number(amount),
         reason,
-        serviceDate: new Date().toISOString().slice(0, 10),
+        serviceDate: toJakartaDateString(),
       });
       setNotice({
         tone: "success",
-        message: "Biaya kerusakan ditambahkan ke folio dan tercatat di audit.",
+        message:
+          "Biaya kerusakan ditambahkan ke tagihan dan tercatat di audit.",
       });
       await onChanged();
     } catch (error) {
@@ -2403,13 +2616,13 @@ function FolioPanel({
     <div className={styles.actionGrid}>
       <section className={`${styles.formCard} ${styles.actionGridWide}`}>
         <div className={styles.panelHeader}>
-          <h2>Pilih folio booking</h2>
+          <h2>Pilih tagihan booking</h2>
         </div>
         <div className={styles.staffForm}>
           <div className={styles.fieldGroup}>
             <span>Booking</span>
             <KookaSelect
-              ariaLabel="Folio booking"
+              ariaLabel="Tagihan booking"
               onChange={(value) => {
                 const booking = bookings.find((item) => item.folioId === value);
                 setDocuments([]);
@@ -2439,14 +2652,17 @@ function FolioPanel({
             <div className={styles.fieldGroup}>
               <span>Jenis</span>
               <KookaSelect
-                ariaLabel="Jenis dokumen folio"
-                onChange={setDocumentType}
+                ariaLabel="Jenis dokumen tagihan"
+                onChange={(value) => {
+                  setDocumentType(value);
+                  if (value !== "INVOICE") setRecipientEmail("");
+                }}
                 options={[
                   { value: "PROFORMA", label: "Proforma" },
                   { value: "INVOICE", label: "Invoice" },
                   { value: "RECEIPT", label: "Receipt" },
                   { value: "REFUND_NOTE", label: "Refund note" },
-                  { value: "FOLIO_STATEMENT", label: "Folio statement" },
+                  { value: "FOLIO_STATEMENT", label: "Rincian tagihan" },
                 ]}
                 value={documentType}
               />
@@ -2454,7 +2670,7 @@ function FolioPanel({
             <div className={styles.fieldGroup}>
               <span>Cakupan</span>
               <KookaSelect
-                ariaLabel="Cakupan dokumen folio"
+                ariaLabel="Cakupan dokumen tagihan"
                 onChange={setScope}
                 options={[
                   { value: "COMBINED", label: "Gabungan semua tagihan" },
@@ -2471,14 +2687,21 @@ function FolioPanel({
                 onChange={(event) => setRecipientName(event.target.value)}
               />
             </label>
-            <label>
-              Email penerima
-              <input
-                type="email"
-                value={recipientEmail}
-                onChange={(event) => setRecipientEmail(event.target.value)}
-              />
-            </label>
+            {documentType === "INVOICE" ? (
+              <label>
+                Email penerima invoice
+                <input
+                  type="email"
+                  value={recipientEmail}
+                  onChange={(event) => setRecipientEmail(event.target.value)}
+                />
+              </label>
+            ) : (
+              <p className={styles.inlineHint}>
+                Dokumen ini hanya dibuat sebagai PDF. Pengiriman email hanya
+                tersedia untuk invoice.
+              </p>
+            )}
           </div>
           <button
             className={styles.primaryButton}
@@ -2609,7 +2832,7 @@ function FolioPanel({
             disabled={!folioId}
             type="submit"
           >
-            Tambahkan ke folio
+            Tambahkan ke tagihan
           </button>
         </form>
       </section>

@@ -34,8 +34,8 @@
 - [ ] `[P0]` Nilai aktual standard/max occupancy, bed configuration, amenity, extra-bed eligibility, dan unit override per room type/unit disetujui.
 - [ ] `[P0]` Jumlah/stok extra bed serta mode tracked/non-tracked ditetapkan.
 - [x] `[P0]` Default check-in `14:00` dan checkout `12:00` Asia/Jakarta disetujui sebagai konfigurasi versioned/effective-dated, bukan hardcoded.
-- [x] `[P0]` Earliest early check-in dan latest late checkout disetujui sebagai field konfigurasi Owner dengan version/effective date, permission, validation, dan audit; tidak hardcoded.
-- [ ] `[P0]` Nilai produksi earliest/latest early-late limit, same-day turnover/cleaning-inspection buffer, overnight-extension threshold, block/OoO rules, dan availability restrictions diisi sebelum UAT.
+- [x] `[P0]` Early check-in, late arrival/check-in, dan late checkout memakai kebijakan Flexible Front Office tanpa cutoff jam global atau no-show otomatis; keputusan beralasan tetap diaudit.
+- [ ] `[P0]` Same-day turnover/cleaning-inspection buffer, aturan extension saat penggunaan masuk malam berikutnya, block/OoO rules, dan availability restrictions diisi sebelum UAT.
 - [ ] `[P1]` Initial room mapping, maintenance blocks, dan Opening Booking/block direkonsiliasi.
 - [ ] `[P1]` Assignment, room move, extension conflict, partial multi-room, dan last-unit concurrency scenarios lulus UAT.
 

@@ -18,6 +18,8 @@ export interface RoomMonitorRoom {
   bookingCode: string | null;
   guestName: string | null;
   nextArrivalAt: string | null;
+  nextArrivalBookingCode: string | null;
+  nextArrivalGuestName: string | null;
   updatedAt: string;
 }
 
@@ -287,6 +289,13 @@ export default function RoomMonitor({
         <section aria-label="Daftar kamar" className={styles.roomGrid}>
           {visibleRooms.map((room) => {
             const condition = roomCondition(room);
+            const hasUpcomingGuest = Boolean(
+              room.nextArrivalAt && room.nextArrivalGuestName,
+            );
+            const displayedGuestName =
+              room.guestName ?? room.nextArrivalGuestName;
+            const displayedBookingCode =
+              room.bookingCode ?? room.nextArrivalBookingCode;
             const conditionClass =
               condition === "OCCUPIED"
                 ? styles.roomCardOccupied
@@ -294,7 +303,7 @@ export default function RoomMonitor({
                   ? styles.roomCardReady
                   : condition === "ATTENTION"
                     ? styles.roomCardAttention
-                    : "";
+                    : styles.roomCardCleaning;
             return (
               <article
                 className={`${styles.roomCard} ${conditionClass}`}
@@ -308,17 +317,33 @@ export default function RoomMonitor({
                   </span>
                 </div>
                 <div className={styles.roomBody}>
+                  {!room.guestName && hasUpcomingGuest ? (
+                    <span className={styles.roomUpcomingLabel}>
+                      Tamu berikutnya
+                    </span>
+                  ) : null}
                   <h2>
-                    {room.guestName ??
+                    {displayedGuestName ??
                       (condition === "READY"
                         ? "Siap menerima tamu"
-                        : "Kamar kosong")}
+                        : condition === "OCCUPIED"
+                          ? "Tamu sedang menginap"
+                          : "Kamar kosong")}
                   </h2>
                   <p>
-                    {room.bookingCode
-                      ? `Booking ${room.bookingCode}`
+                    {displayedBookingCode
+                      ? `Booking ${displayedBookingCode}`
                       : conditionDescription(condition)}
                   </p>
+                  {room.guestName && hasUpcomingGuest ? (
+                    <div className={styles.roomNextArrival}>
+                      <span>Tamu berikutnya</span>
+                      <strong>{room.nextArrivalGuestName}</strong>
+                      <small>
+                        Booking {room.nextArrivalBookingCode ?? "—"}
+                      </small>
+                    </div>
+                  ) : null}
                   {canManageHousekeeping &&
                   room.occupancyStatus === "VACANT" &&
                   condition !== "READY" ? (

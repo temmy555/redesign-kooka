@@ -105,7 +105,7 @@ function responseFor(error: unknown) {
     );
   const response = toErrorResponse(
     error instanceof z.ZodError
-      ? new AppError("VALIDATION_ERROR", "Invalid folio operation")
+      ? new AppError("VALIDATION_ERROR", "Operasi tagihan tidak valid")
       : error,
   );
   return NextResponse.json(response.body, { status: response.status });
@@ -117,7 +117,7 @@ export async function GET(request: Request) {
     const propertyId = await getActivePropertyId();
     const folioId = new URL(request.url).searchParams.get("folioId");
     if (!folioId || !z.string().uuid().safeParse(folioId).success)
-      throw new AppError("VALIDATION_ERROR", "folioId is required");
+      throw new AppError("VALIDATION_ERROR", "Pilih tagihan terlebih dahulu");
     return NextResponse.json(await getFolio({ propertyId, folioId, session }));
   } catch (error) {
     return responseFor(error);

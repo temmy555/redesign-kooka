@@ -25,9 +25,11 @@ export function assertMigrationEnvironment(environment) {
   }
 
   if (environment.APP_ENV === "production") {
-    throw new Error(
-      "Production migrations are disabled in this local workflow",
-    );
+    if (environment.ALLOW_PRODUCTION_MIGRATION !== "YES") {
+      throw new Error(
+        "Production migrations require ALLOW_PRODUCTION_MIGRATION=YES",
+      );
+    }
   }
 }
 

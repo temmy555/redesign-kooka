@@ -10,6 +10,7 @@ function chain(rows: unknown[] = []) {
     for: () => link,
     set: () => link,
     values: () => link,
+    onConflictDoNothing: () => link,
     returning: () => link,
     then: (resolve: (value: unknown[]) => void) => resolve(rows),
   };
@@ -115,6 +116,7 @@ describe("manual booking payment service", () => {
   it("records payment evidence and queues the review notification", async () => {
     mocks.select
       .mockReturnValueOnce(chain([reservation]))
+      .mockReturnValueOnce(chain([{ paymentInstructionVersionId: U4 }]))
       .mockReturnValueOnce(chain([{ id: U4 }]));
     mocks.insert
       .mockReturnValueOnce(
@@ -130,6 +132,7 @@ describe("manual booking payment service", () => {
       reservationId: U2,
       amountIdr: 500000,
       method: "BANK_TRANSFER",
+      paymentInstructionVersionId: U4,
       receivedAt: new Date("2026-08-02T08:00:00.000Z"),
       reference: " BANK-123 ",
       proofFileId: U4,
@@ -143,6 +146,39 @@ describe("manual booking payment service", () => {
     });
     expect(mocks.enqueueOutboxEvent).toHaveBeenCalledOnce();
     expect(mocks.recordAuditEvent).toHaveBeenCalledOnce();
+  });
+
+  it("allows a completed booking to settle an outstanding open folio", async () => {
+    mocks.select
+      .mockReturnValueOnce(
+        chain([{ ...reservation, source: "MANUAL", status: "COMPLETED" }]),
+      )
+      .mockReturnValueOnce(chain([{ id: U4, status: "OPEN" }]));
+    mocks.execute.mockResolvedValueOnce({
+      rows: [{ balanceIdr: "120000" }],
+    });
+    mocks.insert
+      .mockReturnValueOnce(
+        chain([{ id: U3, paymentCode: payment.paymentCode }]),
+      )
+      .mockReturnValueOnce(chain())
+      .mockReturnValueOnce(chain([{ id: U2 }]));
+
+    const result = await recordPaymentForReview({
+      propertyId: U1,
+      session,
+      reservationId: U2,
+      amountIdr: 120000,
+      method: "CASH",
+      receivedAt: new Date("2026-08-03T09:00:00.000Z"),
+      idempotencyKey: "late-folio-settlement",
+    });
+
+    expect(result).toMatchObject({
+      paymentId: U3,
+      status: "PENDING_VERIFICATION",
+    });
+    expect(mocks.execute).toHaveBeenCalledOnce();
   });
 
   it("rejects evidence received after an online booking deadline", async () => {
@@ -293,7 +329,8 @@ describe("manual booking payment service", () => {
       idempotencyKey: "payment-partial",
     });
     expect(result.status).toBe("VERIFIED");
-    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(mocks.update).toHaveBeenCalledOnce();
+    expect(mocks.enqueueOutboxEvent).not.toHaveBeenCalled();
   });
 
   it("expires an overdue hold when its payment proof is rejected", async () => {

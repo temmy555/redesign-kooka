@@ -2473,6 +2473,52 @@ footer > div strong {
   line-height: 1.65;
 }
 
+.transfer-choice-label {
+  margin: 24px 0 12px;
+  color: rgba(24, 55, 47, 0.62);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.transfer-account-list,
+.lookup-bank-list {
+  display: grid;
+  gap: 10px;
+}
+
+.transfer-account,
+.lookup-bank-account {
+  display: grid;
+  gap: 5px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: rgba(183, 197, 167, 0.14);
+}
+
+.transfer-account strong,
+.lookup-bank-account strong {
+  font-size: 12px;
+}
+
+.transfer-account span,
+.lookup-bank-account span {
+  font-family: var(--serif);
+  font-size: 24px;
+}
+
+.transfer-account small,
+.lookup-bank-account small {
+  color: rgba(24, 55, 47, 0.62);
+  line-height: 1.5;
+}
+
+.transfer-account p,
+.lookup-bank-account p {
+  margin: 4px 0 0;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
 .payment-steps-card ol {
   display: grid;
   gap: 16px;
@@ -2824,6 +2870,12 @@ footer > div strong {
 .lookup-bank {
   display: flex;
   flex-direction: column;
+}
+
+.lookup-bank > p:not(.eyebrow) {
+  margin: 18px 0 12px;
+  color: rgba(24, 55, 47, 0.62);
+  font-size: 11px;
 }
 
 .lookup-arrival {

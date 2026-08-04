@@ -189,6 +189,35 @@ describe("booking and payment routes", () => {
     );
   });
 
+  it("logs unexpected reservation failures and returns a safe response", async () => {
+    mocks.createReservation.mockRejectedValue(new Error("missing UAT table"));
+    const response = await reservationPost(
+      request(
+        "/api/booking/reservations",
+        {
+          quoteId: U1,
+          booker: {
+            name: "Budi Santoso",
+            email: "budi@example.com",
+          },
+          acknowledgedPolicyVersionIds: [],
+        },
+        "reservation-error",
+      ),
+    );
+
+    expect(response.status).toBe(500);
+    expect(mocks.logError).toHaveBeenCalledWith(
+      expect.objectContaining({ errorMessage: "missing UAT table" }),
+      "Public reservation creation failed",
+    );
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({ code: "INTERNAL_ERROR" }),
+      }),
+    );
+  });
+
   it("creates a code-and-email lookup session and reads it with bearer token", async () => {
     mocks.createCustomerLookupSession.mockResolvedValue({
       token: "lookup-token",

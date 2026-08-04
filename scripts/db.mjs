@@ -11,7 +11,9 @@ import {
 import { loadLocalApplicationEnvironment } from "./lib/local-environment.mjs";
 
 async function main() {
-  loadLocalApplicationEnvironment();
+  if (!process.env.DATABASE_URL) {
+    loadLocalApplicationEnvironment();
+  }
   const environment = process.env;
   const command = process.argv[2] ?? "status";
   assertMigrationEnvironment(environment);

@@ -85,7 +85,7 @@ describe("commercial master service", () => {
   });
 
   it("returns all commercial master collections", async () => {
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       mocks.select.mockReturnValueOnce(chain([{ id: `${index}` }]));
     }
     const result = await getCommercialMasterOverview({
@@ -94,6 +94,7 @@ describe("commercial master service", () => {
     });
     expect(result.taxes).toHaveLength(1);
     expect(result.ratePlans).toHaveLength(1);
+    expect(result.rateRules).toHaveLength(1);
     expect(result.documentSequences).toHaveLength(1);
   });
 

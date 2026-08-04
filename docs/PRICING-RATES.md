@@ -56,6 +56,8 @@ Phase 1 direkomendasikan memulai dengan `Standard Room Only` dan `Custom/Admin R
 
 Payment requirement mengikuti booking source. Customer-created online booking selalu memiliki full-payment requirement 100% sebelum confirmation, terlepas dari rate plan. Deposit persentase/nominal tetap hanya dapat dipilih oleh staf berizin ketika membuat manual booking dan tersimpan pada booking policy snapshot.
 
+Rekening transfer tidak termasuk konfigurasi rate plan. Seluruh rekening properti yang aktif berlaku untuk semua room type/rate plan dan ditampilkan sebagai pilihan setelah booking online dibuat. Reservation menyimpan daftar versi rekening yang ditawarkan agar histori tidak berubah ketika master rekening diperbarui.
+
 ### 3.4 Rate resolution dan coverage
 
 Urutan resolusi default yang disetujui:

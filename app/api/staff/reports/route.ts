@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
-  createCsvReportExport,
+  createExcelReportExport,
   getOperationalDashboard,
   runDailyRollover,
   runReconciliation,
   updateReconciliationException,
 } from "../../../../src/modules/reporting/reporting-service";
+import { createExcelWorkbook } from "../../../../src/platform/excel-workbook";
 import { AuthorizationError } from "../../../../src/platform/authorization";
 import { AppError, toErrorResponse } from "../../../../src/platform/errors";
 import { getActivePropertyId } from "../../../../src/platform/property";
@@ -39,7 +40,7 @@ const mutationSchema = z.discriminatedUnion("action", [
     assignedToUserId: z.string().uuid().optional(),
   }),
   z.object({
-    action: z.literal("EXPORT_CSV"),
+    action: z.literal("EXPORT_EXCEL"),
     reportCode: z.enum([
       "DAILY_OPERATIONS",
       "BOOKINGS",
@@ -135,7 +136,7 @@ export async function POST(request: Request) {
           assignedToUserId: body.assignedToUserId,
         }),
       );
-    const result = await createCsvReportExport({
+    const result = await createExcelReportExport({
       propertyId,
       session,
       idempotencyKey,
@@ -143,10 +144,19 @@ export async function POST(request: Request) {
       rangeStart: body.rangeStart,
       rangeEnd: body.rangeEnd,
     });
-    return new Response(result.csv, {
+    const workbook = await createExcelWorkbook({
+      sheetName: result.sheetName,
+      title: result.title,
+      subtitle: result.subtitle,
+      headers: result.headers,
+      columnWidths: result.columnWidths,
+      rows: result.rows,
+    });
+    return new Response(workbook, {
       status: 200,
       headers: {
-        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="${result.filename}"`,
         "Cache-Control": "private, no-store, max-age=0",
         "X-Content-Type-Options": "nosniff",

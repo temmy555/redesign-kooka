@@ -6,6 +6,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import {
   folioEntries,
+  folioStatusEvents,
   folios,
   inventoryClaimEvents,
   inventoryClaims,
@@ -14,6 +15,7 @@ import {
   payments,
   paymentStatusEvents,
   reservations,
+  reservationPaymentInstructions,
   reservationRooms,
   reservationStatusEvents,
   resourceClaims,
@@ -25,6 +27,7 @@ import { withIdempotency } from "../../platform/idempotency";
 import type { IdempotencyTransaction } from "../../platform/idempotency";
 import { enqueueOutboxEvent } from "../../platform/outbox";
 import type { StaffSessionLike } from "./contracts";
+import { buildBookingStatusEmail } from "./customer-email";
 import { stableRequestHash } from "./domain";
 
 function paymentCode(now = new Date()) {
@@ -39,6 +42,8 @@ async function queuePaymentEmail(
     recipient: string;
     subject: string;
     body: string;
+    html: string;
+    emailType: "PAYMENT_RECORDED" | "BOOKING_CONFIRMED";
     key: string;
   },
 ) {
@@ -55,8 +60,12 @@ async function queuePaymentEmail(
       scheduledAt: new Date(),
       idempotencyKey: input.key,
     })
+    .onConflictDoNothing({ target: notificationMessages.idempotencyKey })
     .returning({ id: notificationMessages.id });
-  if (!message) throw new Error("Failed to queue payment email");
+  // Confirmation is intentionally reservation-scoped. If a payment is voided
+  // and verified again later, the business transaction must still succeed
+  // without sending the same customer confirmation twice.
+  if (!message) return;
   await enqueueOutboxEvent(
     {
       topic: "notification.email",
@@ -67,6 +76,8 @@ async function queuePaymentEmail(
         to: input.recipient,
         subject: input.subject,
         text: input.body,
+        html: input.html,
+        customerEmailType: input.emailType,
       },
     },
     tx,
@@ -82,6 +93,7 @@ export async function recordPaymentForReview(params: {
     "BANK_TRANSFER" | "CASH" | "PAY_AT_CHECKIN" | "PAY_AT_CHECKOUT" | "OTHER";
   receivedAt: Date;
   reference?: string | null;
+  paymentInstructionVersionId?: string | null;
   proofFileId?: string | null;
   notes?: string | null;
   idempotencyKey: string;
@@ -103,6 +115,7 @@ export async function recordPaymentForReview(params: {
         method: params.method,
         receivedAt: params.receivedAt.toISOString(),
         reference: params.reference ?? null,
+        paymentInstructionVersionId: params.paymentInstructionVersionId ?? null,
         proofFileId: params.proofFileId ?? null,
       }),
       ownerUserId: params.session.user.id,
@@ -121,11 +134,12 @@ export async function recordPaymentForReview(params: {
         .for("update");
       if (
         !reservation ||
-        !["ON_HOLD", "CONFIRMED"].includes(reservation.status)
+        !["ON_HOLD", "CONFIRMED", "COMPLETED"].includes(reservation.status)
       ) {
         throw new AppError("CONFLICT", "Reservation cannot accept a payment");
       }
       if (
+        reservation.status === "ON_HOLD" &&
         reservation.source === "ONLINE" &&
         reservation.paymentDeadlineAt &&
         params.receivedAt > reservation.paymentDeadlineAt
@@ -135,14 +149,68 @@ export async function recordPaymentForReview(params: {
           "Payment evidence was received after the booking deadline",
         );
       }
+      let destinationPaymentInstructionVersionId: string | null = null;
+      if (params.method === "BANK_TRANSFER") {
+        if (!params.paymentInstructionVersionId) {
+          throw new AppError(
+            "VALIDATION_ERROR",
+            "Select the KOOKA bank account that received the transfer",
+          );
+        }
+        const [snapshottedInstruction] = await tx
+          .select({
+            paymentInstructionVersionId:
+              reservationPaymentInstructions.paymentInstructionVersionId,
+          })
+          .from(reservationPaymentInstructions)
+          .where(
+            and(
+              eq(reservationPaymentInstructions.reservationId, reservation.id),
+              eq(
+                reservationPaymentInstructions.paymentInstructionVersionId,
+                params.paymentInstructionVersionId,
+              ),
+            ),
+          )
+          .limit(1);
+        const matchesLegacyInstruction =
+          reservation.paymentInstructionVersionId ===
+          params.paymentInstructionVersionId;
+        if (!snapshottedInstruction && !matchesLegacyInstruction) {
+          throw new AppError(
+            "VALIDATION_ERROR",
+            "The selected bank account was not offered for this booking",
+          );
+        }
+        destinationPaymentInstructionVersionId =
+          params.paymentInstructionVersionId;
+      }
       const [folio] = await tx
-        .select({ id: folios.id })
+        .select({ id: folios.id, status: folios.status })
         .from(folios)
         .where(eq(folios.reservationId, reservation.id))
         .limit(1)
         .for("update");
       if (!folio)
-        throw new AppError("CONFLICT", "Reservation folio is missing");
+        throw new AppError("CONFLICT", "Data tagihan booking tidak ditemukan");
+      if (reservation.status === "COMPLETED") {
+        const balanceResult = await tx.execute<{ balanceIdr: string }>(sql`
+          select coalesce(sum(case when entry_type = 'DEBIT'
+            then total_amount_idr else -total_amount_idr end), 0)::text as "balanceIdr"
+          from folio_entries
+          where folio_id = ${folio.id}
+        `);
+        const balanceIdr = Number(balanceResult.rows[0]?.balanceIdr ?? 0);
+        if (
+          folio.status !== "OPEN" ||
+          balanceIdr <= 0 ||
+          params.amountIdr > balanceIdr
+        )
+          throw new AppError(
+            "CONFLICT",
+            "Booking yang sudah checkout hanya dapat menerima pelunasan sesuai sisa tagihan",
+          );
+      }
       const [payment] = await tx
         .insert(payments)
         .values({
@@ -153,8 +221,11 @@ export async function recordPaymentForReview(params: {
           status: "PENDING_VERIFICATION",
           receivedAt: params.receivedAt,
           reference: params.reference?.trim() || null,
-          paymentInstructionVersionId: reservation.paymentInstructionVersionId,
-          destinationSnapshot: { reservationId: reservation.id },
+          paymentInstructionVersionId: destinationPaymentInstructionVersionId,
+          destinationSnapshot: {
+            reservationId: reservation.id,
+            paymentInstructionVersionId: destinationPaymentInstructionVersionId,
+          },
           idempotencyKey: params.idempotencyKey,
           createdByUserId: params.session.user.id,
           updatedByUserId: params.session.user.id,
@@ -178,18 +249,19 @@ export async function recordPaymentForReview(params: {
         actorUserId: params.session.user.id,
         createdByUserId: params.session.user.id,
       });
+      const reviewEmail = buildBookingStatusEmail({
+        kind: "PAYMENT_RECORDED",
+        language: reservation.language === "en" ? "en" : "id",
+        bookingCode: reservation.bookingCode,
+      });
       await queuePaymentEmail(tx, {
         propertyId: params.propertyId,
         reservationId: reservation.id,
         recipient: reservation.bookerEmailNormalized,
-        subject:
-          reservation.language === "en"
-            ? `Payment is being reviewed ${reservation.bookingCode}`
-            : `Pembayaran sedang diverifikasi ${reservation.bookingCode}`,
-        body:
-          reservation.language === "en"
-            ? `We recorded payment evidence for booking ${reservation.bookingCode}. Your room inventory remains held while Front Office verifies it.`
-            : `Bukti pembayaran untuk booking ${reservation.bookingCode} telah dicatat. Inventori kamar tetap ditahan selama Front Office melakukan verifikasi.`,
+        subject: reviewEmail.subject,
+        body: reviewEmail.text,
+        html: reviewEmail.html,
+        emailType: "PAYMENT_RECORDED",
         key: `payment:${payment.id}:review`,
       });
       await recordAuditEvent(
@@ -204,6 +276,7 @@ export async function recordPaymentForReview(params: {
             reservationId: reservation.id,
             amountIdr: params.amountIdr,
             method: params.method,
+            paymentInstructionVersionId: destinationPaymentInstructionVersionId,
             hasProof: Boolean(params.proofFileId),
           },
           reason: "Manual payment evidence intake",
@@ -263,7 +336,11 @@ export async function reviewPayment(params: {
         .where(eq(folios.id, payment.folioId))
         .limit(1)
         .for("update");
-      if (!folio) throw new AppError("CONFLICT", "Payment folio is missing");
+      if (!folio)
+        throw new AppError(
+          "CONFLICT",
+          "Data tagihan untuk pembayaran tidak ditemukan",
+        );
       const [reservation] = await tx
         .select()
         .from(reservations)
@@ -308,20 +385,6 @@ export async function reviewPayment(params: {
             "Payment rejected after deadline",
           );
         }
-        await queuePaymentEmail(tx, {
-          propertyId: params.propertyId,
-          reservationId: reservation.id,
-          recipient: reservation.bookerEmailNormalized,
-          subject:
-            reservation.language === "en"
-              ? `Payment review update ${reservation.bookingCode}`
-              : `Pembaruan verifikasi pembayaran ${reservation.bookingCode}`,
-          body:
-            reservation.language === "en"
-              ? `The payment for booking ${reservation.bookingCode} could not be verified. Please contact Front Office.`
-              : `Pembayaran untuk booking ${reservation.bookingCode} belum dapat diverifikasi. Silakan hubungi Front Office.`,
-          key: `payment:${payment.id}:rejected`,
-        });
       } else {
         const [entry] = await tx
           .insert(folioEntries)
@@ -367,6 +430,36 @@ export async function reviewPayment(params: {
           actorUserId: params.session.user.id,
           createdByUserId: params.session.user.id,
         });
+        if (reservation.status === "COMPLETED") {
+          const balanceResult = await tx.execute<{ balanceIdr: string }>(sql`
+            select coalesce(sum(case when entry_type = 'DEBIT'
+              then total_amount_idr else -total_amount_idr end), 0)::text as "balanceIdr"
+            from folio_entries
+            where folio_id = ${folio.id}
+          `);
+          const balanceIdr = Number(balanceResult.rows[0]?.balanceIdr ?? 0);
+          if (Math.abs(balanceIdr) < 0.5 && folio.status === "OPEN") {
+            await tx
+              .update(folios)
+              .set({
+                status: "CLOSED",
+                closedAt: now,
+                closedByUserId: params.session.user.id,
+                updatedByUserId: params.session.user.id,
+              })
+              .where(eq(folios.id, folio.id));
+            await tx.insert(folioStatusEvents).values({
+              folioId: folio.id,
+              action: "CLOSE_AFTER_LATE_SETTLEMENT",
+              fromStatus: "OPEN",
+              toStatus: "CLOSED",
+              reason,
+              guardResult: { balanceIdr },
+              actorUserId: params.session.user.id,
+              createdByUserId: params.session.user.id,
+            });
+          }
+        }
         const verified = await tx
           .select({ amountIdr: payments.amountIdr })
           .from(payments)
@@ -380,6 +473,8 @@ export async function reviewPayment(params: {
           (total, row) => total + Number(row.amountIdr),
           0,
         );
+        const previouslyVerifiedTotal =
+          verifiedTotal - Number(payment.amountIdr);
         const fullyPaid =
           verifiedTotal >= Number(reservation.requiredPaymentIdr);
         if (
@@ -449,32 +544,26 @@ export async function reviewPayment(params: {
               ),
             );
         }
-        await tx
-          .update(notificationMessages)
-          .set({
-            status: "CANCELLED",
-            updatedAt: now,
-            updatedByUserId: params.session.user.id,
-          })
-          .where(
-            and(
-              eq(notificationMessages.reservationId, reservation.id),
-              eq(notificationMessages.status, "QUEUED"),
-              sql`${notificationMessages.scheduledAt} > ${now}`,
-            ),
-          );
-        await queuePaymentEmail(tx, {
-          propertyId: params.propertyId,
-          reservationId: reservation.id,
-          recipient: reservation.bookerEmailNormalized,
-          subject: fullyPaid
-            ? `Booking confirmed ${reservation.bookingCode}`
-            : `Payment verified ${reservation.bookingCode}`,
-          body: fullyPaid
-            ? `Payment has been verified and booking ${reservation.bookingCode} is confirmed.`
-            : `Payment has been verified for booking ${reservation.bookingCode}. An outstanding balance remains.`,
-          key: `payment:${payment.id}:verified`,
-        });
+        if (
+          fullyPaid &&
+          previouslyVerifiedTotal < Number(reservation.requiredPaymentIdr)
+        ) {
+          const confirmationEmail = buildBookingStatusEmail({
+            kind: "BOOKING_CONFIRMED",
+            language: reservation.language === "en" ? "en" : "id",
+            bookingCode: reservation.bookingCode,
+          });
+          await queuePaymentEmail(tx, {
+            propertyId: params.propertyId,
+            reservationId: reservation.id,
+            recipient: reservation.bookerEmailNormalized,
+            subject: confirmationEmail.subject,
+            body: confirmationEmail.text,
+            html: confirmationEmail.html,
+            emailType: "BOOKING_CONFIRMED",
+            key: `reservation:${reservation.id}:confirmed`,
+          });
+        }
       }
       await recordAuditEvent(
         {
@@ -543,7 +632,11 @@ export async function voidPayment(params: {
         .where(eq(folios.id, payment.folioId))
         .limit(1)
         .for("update");
-      if (!folio) throw new AppError("CONFLICT", "Payment folio is missing");
+      if (!folio)
+        throw new AppError(
+          "CONFLICT",
+          "Data tagihan untuk pembayaran tidak ditemukan",
+        );
       const [reservation] = await tx
         .select()
         .from(reservations)
@@ -560,7 +653,10 @@ export async function voidPayment(params: {
       const now = new Date();
       if (payment.status === "VERIFIED") {
         if (!payment.folioEntryId) {
-          throw new AppError("CONFLICT", "Verified payment has no folio entry");
+          throw new AppError(
+            "CONFLICT",
+            "Pembayaran terverifikasi belum tercatat pada tagihan",
+          );
         }
         await tx.insert(folioEntries).values({
           folioId: folio.id,
@@ -681,14 +777,6 @@ export async function voidPayment(params: {
           );
         }
       }
-      await queuePaymentEmail(tx, {
-        propertyId: params.propertyId,
-        reservationId: reservation.id,
-        recipient: reservation.bookerEmailNormalized,
-        subject: `Payment update ${reservation.bookingCode}`,
-        body: `Payment ${payment.paymentCode} for booking ${reservation.bookingCode} was voided. Please contact Front Office for the current balance.`,
-        key: `payment:${payment.id}:voided`,
-      });
       await recordAuditEvent(
         {
           propertyId: params.propertyId,

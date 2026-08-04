@@ -1,12 +1,14 @@
 import "server-only";
 
-import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import {
   checkinCaptureItems,
   checkinRegistrations,
   cleaningTasks,
   departureClearances,
+  folios,
+  folioStatusEvents,
   guestIdentityDetails,
   reservationGuests,
   reservationRooms,
@@ -47,13 +49,38 @@ const TO_STATUS: Record<Exclude<StayAction, "RELEASE_NO_SHOW">, StayStatus> = {
   REOPEN_NO_SHOW: "DUE_IN",
 };
 
-function jakartaToday(now = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Jakarta",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
+async function releaseAssignmentInventory(
+  tx: IdempotencyTransaction,
+  assignmentId: string,
+  releasedAt: Date,
+) {
+  const nights = await tx
+    .select({
+      id: roomAssignmentNights.id,
+      claimId: roomAssignmentNights.roomUnitNightClaimId,
+    })
+    .from(roomAssignmentNights)
+    .where(eq(roomAssignmentNights.roomAssignmentId, assignmentId));
+  for (const night of nights) {
+    await tx
+      .update(roomAssignmentNights)
+      .set({ releasedAt })
+      .where(
+        and(
+          eq(roomAssignmentNights.id, night.id),
+          isNull(roomAssignmentNights.releasedAt),
+        ),
+      );
+    await tx
+      .update(roomUnitNightClaims)
+      .set({ claimStatus: "RELEASED", releasedAt })
+      .where(
+        and(
+          eq(roomUnitNightClaims.id, night.claimId),
+          eq(roomUnitNightClaims.claimStatus, "ACTIVE"),
+        ),
+      );
+  }
 }
 
 export async function transitionStay(params: {
@@ -106,6 +133,7 @@ export async function transitionStay(params: {
         .select({
           id: roomAssignments.id,
           roomUnitId: roomAssignments.roomUnitId,
+          effectiveFrom: roomAssignments.effectiveFrom,
           housekeepingStatus: roomUnitStates.housekeepingStatus,
           serviceabilityStatus: roomUnitStates.serviceabilityStatus,
         })
@@ -128,29 +156,8 @@ export async function transitionStay(params: {
           throw new AppError("CONFLICT", "Only a no-show stay can be released");
         }
         if (assignment) {
-          const nights = await tx
-            .select({
-              id: roomAssignmentNights.id,
-              claimId: roomAssignmentNights.roomUnitNightClaimId,
-            })
-            .from(roomAssignmentNights)
-            .where(
-              and(
-                eq(roomAssignmentNights.roomAssignmentId, assignment.id),
-                isNull(roomAssignmentNights.releasedAt),
-              ),
-            );
           const now = new Date();
-          for (const night of nights) {
-            await tx
-              .update(roomAssignmentNights)
-              .set({ releasedAt: now })
-              .where(eq(roomAssignmentNights.id, night.id));
-            await tx
-              .update(roomUnitNightClaims)
-              .set({ claimStatus: "RELEASED", releasedAt: now })
-              .where(eq(roomUnitNightClaims.id, night.claimId));
-          }
+          await releaseAssignmentInventory(tx, assignment.id, now);
           await tx
             .update(roomAssignments)
             .set({
@@ -209,6 +216,65 @@ export async function transitionStay(params: {
         }
       }
 
+      let checkoutSettlement:
+        | {
+            folioId: string;
+            folioStatus: string;
+            balanceIdr: number;
+          }
+        | undefined;
+      if (params.action === "CHECK_OUT") {
+        const settlement = await tx.execute<{
+          folioId: string;
+          folioStatus: string;
+          balanceIdr: string;
+        }>(sql`
+          select f.id as "folioId", f.status as "folioStatus",
+            (select coalesce(sum(
+                case when fe.entry_type = 'DEBIT'
+                  then fe.total_amount_idr
+                  else -fe.total_amount_idr
+                end
+              ), 0)::text
+              from folio_entries fe
+              where fe.folio_id = f.id
+            ) as "balanceIdr"
+          from folios f
+          where f.reservation_id = ${current.reservationId}
+          for update of f
+        `);
+        const folio = settlement.rows[0];
+        if (!folio)
+          throw new AppError(
+            "CONFLICT",
+            "Checkout tidak dapat diproses karena data tagihan booking tidak ditemukan",
+          );
+        const balanceIdr = Number(folio.balanceIdr);
+        if (!Number.isFinite(balanceIdr))
+          throw new AppError(
+            "CONFLICT",
+            "Checkout tidak dapat diproses karena sisa tagihan tidak valid",
+          );
+        if (Math.abs(balanceIdr) >= 0.5) {
+          const amount = new Intl.NumberFormat("id-ID", {
+            style: "currency",
+            currency: "IDR",
+            maximumFractionDigits: 0,
+          }).format(Math.abs(balanceIdr));
+          throw new AppError(
+            "CONFLICT",
+            balanceIdr > 0
+              ? `Checkout belum dapat diproses. Masih ada tagihan ${amount}. Lunasi tagihan terlebih dahulu.`
+              : `Checkout belum dapat diproses. Terdapat kelebihan pembayaran ${amount}. Selesaikan refund atau penyesuaian tagihan terlebih dahulu.`,
+          );
+        }
+        checkoutSettlement = {
+          folioId: folio.folioId,
+          folioStatus: folio.folioStatus,
+          balanceIdr,
+        };
+      }
+
       const now = new Date();
       await tx
         .update(roomStays)
@@ -216,7 +282,12 @@ export async function transitionStay(params: {
           status: toStatus,
           actualCheckInAt: params.action === "CHECK_IN" ? now : undefined,
           actualCheckOutAt: params.action === "CHECK_OUT" ? now : undefined,
-          chargePrivilege: params.action === "CHECK_IN" ? "ALLOWED" : undefined,
+          chargePrivilege:
+            params.action === "CHECK_IN"
+              ? "ALLOWED"
+              : params.action === "CHECK_OUT"
+                ? "NOT_ALLOWED"
+                : undefined,
           updatedByUserId: params.session.user.id,
         })
         .where(eq(roomStays.id, params.roomStayId));
@@ -232,13 +303,24 @@ export async function transitionStay(params: {
           readinessOverride: Boolean(params.overrideReadiness),
           roomChargeAllowed: params.action === "CHECK_IN",
           guaranteedNoShowRoomRetained: params.action === "MARK_NO_SHOW",
+          arrivalPolicy:
+            params.action === "CHECK_IN" ? "FLEXIBLE_FRONT_OFFICE" : undefined,
+          arrivalTimeCutoffEnforced:
+            params.action === "CHECK_IN" ? false : undefined,
         },
       });
 
       if (assignment && params.action === "CHECK_IN") {
         await tx
           .update(roomAssignments)
-          .set({ status: "ACTIVE", updatedByUserId: params.session.user.id })
+          .set({
+            status: "ACTIVE",
+            effectiveFrom:
+              assignment.effectiveFrom && assignment.effectiveFrom < now
+                ? assignment.effectiveFrom
+                : now,
+            updatedByUserId: params.session.user.id,
+          })
           .where(eq(roomAssignments.id, assignment.id));
         await tx
           .update(roomUnitStates)
@@ -303,29 +385,7 @@ export async function transitionStay(params: {
               updatedByUserId: params.session.user.id,
             })
             .where(eq(roomUnitStates.roomUnitId, assignment.roomUnitId));
-          const futureNights = await tx
-            .select({
-              id: roomAssignmentNights.id,
-              claimId: roomAssignmentNights.roomUnitNightClaimId,
-            })
-            .from(roomAssignmentNights)
-            .where(
-              and(
-                eq(roomAssignmentNights.roomAssignmentId, assignment.id),
-                gte(roomAssignmentNights.stayDate, jakartaToday(now)),
-                isNull(roomAssignmentNights.releasedAt),
-              ),
-            );
-          for (const night of futureNights) {
-            await tx
-              .update(roomAssignmentNights)
-              .set({ releasedAt: now })
-              .where(eq(roomAssignmentNights.id, night.id));
-            await tx
-              .update(roomUnitNightClaims)
-              .set({ claimStatus: "RELEASED", releasedAt: now })
-              .where(eq(roomUnitNightClaims.id, night.claimId));
-          }
+          await releaseAssignmentInventory(tx, assignment.id, now);
         }
         await tx
           .update(reservationRooms)
@@ -338,6 +398,27 @@ export async function transitionStay(params: {
           sql`select count(*)::text as count from reservation_rooms where reservation_id = ${current.reservationId} and line_status = 'ACTIVE' and id <> ${current.reservationRoomId}`,
         );
         if (Number(remaining.rows[0]?.count ?? 0) === 0) {
+          if (checkoutSettlement && checkoutSettlement.folioStatus === "OPEN") {
+            await tx
+              .update(folios)
+              .set({
+                status: "CLOSED",
+                closedAt: now,
+                closedByUserId: params.session.user.id,
+                updatedByUserId: params.session.user.id,
+              })
+              .where(eq(folios.id, checkoutSettlement.folioId));
+            await tx.insert(folioStatusEvents).values({
+              folioId: checkoutSettlement.folioId,
+              action: "CLOSE_AT_FINAL_CHECKOUT",
+              fromStatus: "OPEN",
+              toStatus: "CLOSED",
+              reason: params.reason,
+              guardResult: { balanceIdr: checkoutSettlement.balanceIdr },
+              actorUserId: params.session.user.id,
+              createdByUserId: params.session.user.id,
+            });
+          }
           await tx
             .update(reservations)
             .set({
@@ -393,6 +474,12 @@ export async function transitionStay(params: {
               params.action === "CHECK_IN"
                 ? "ALLOWED"
                 : current.chargePrivilege,
+            arrivalPolicy:
+              params.action === "CHECK_IN"
+                ? "FLEXIBLE_FRONT_OFFICE"
+                : undefined,
+            arrivalTimeCutoffEnforced:
+              params.action === "CHECK_IN" ? false : undefined,
           },
           reason: params.reason,
           result: "SUCCESS",

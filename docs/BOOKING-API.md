@@ -4,17 +4,17 @@ Status: `IMPLEMENTED — UAT VERIFIED` pada 3 Agustus 2026. Alur publik telah di
 
 ## Public flow
 
-1. `GET /api/booking/availability` menerima `checkInDate`, `checkoutDate`, `rooms`, `adults`, `children`, dan `infants`, lalu hanya menawarkan kombinasi tipe kamar + rate plan yang memiliki inventory, tarif online, dan payment instruction.
+1. `GET /api/booking/availability` menerima `checkInDate`, `checkoutDate`, `rooms`, `adults`, `children`, dan `infants`, lalu hanya menawarkan kombinasi tipe kamar + rate plan yang memiliki inventory dan tarif online. Booking online tersedia bila properti memiliki minimal satu rekening transfer aktif; rekening tidak dipilih per rate plan.
 2. Customer menekan `Pilih kamar`; `POST /api/booking/quote` membuat snapshot harga/nightly tax/display estimate, mengembalikan policy version yang wajib disetujui, serta membuat checkout hold 15 menit. Header `Idempotency-Key` wajib.
 3. Setelah customer mengisi nama, email, dan WhatsApp, `POST /api/booking/reservations` mengubah quote menjadi online reservation atomik. Online selalu membutuhkan 100% pembayaran IDR dan tidak menerima deposit.
-4. Halaman sukses menampilkan booking code, batas pembayaran, rekening, nominal resmi IDR, dan tombol WhatsApp berisi pesan siap kirim. WhatsApp baru digunakan untuk mengirim booking code serta bukti transfer; Front Office tetap memverifikasi pembayaran di admin.
+4. Halaman sukses menampilkan booking code, batas pembayaran, seluruh rekening transfer properti yang aktif saat booking dibuat, nominal resmi IDR, dan tombol WhatsApp berisi pesan siap kirim. Tamu dapat memilih salah satu rekening tersebut. WhatsApp digunakan untuk mengirim booking code serta bukti transfer; Front Office tetap memverifikasi pembayaran di admin.
 5. `POST /api/booking/lookup` memverifikasi booking code dan, bila diberikan, email tambahan dengan error generik serta rate limit, lalu membuat cookie session HttpOnly berumur 15 menit.
-6. `GET /api/booking/lookup` menampilkan ringkasan booking, saldo IDR, status payment, payment instruction snapshot, serta WhatsApp deep link. Customer tidak memperoleh fitur login, ubah, atau cancel mandiri.
+6. `GET /api/booking/lookup` menampilkan ringkasan booking, saldo IDR, status payment, seluruh payment-instruction snapshot, serta WhatsApp deep link. Snapshot menjaga agar rekening yang dilihat tamu tetap sesuai dengan saat booking dibuat walaupun konfigurasi properti berubah. Customer tidak memperoleh fitur login, ubah, atau cancel mandiri.
 
 ## Staff flow
 
 - `POST /api/staff/bookings`, action `QUOTE` atau `RESERVE`, melayani manual single/multi-room booking. Deposit fixed/percentage serta pay-at-checkin/checkout hanya tersedia pada source admin.
-- `POST /api/staff/payments`, action `RECORD_FOR_REVIEW`, mencatat bukti/referensi yang diterima Front Office dan melindungi inventory dari expiry selama review.
+- `POST /api/staff/payments`, action `RECORD_FOR_REVIEW`, mencatat bukti/referensi yang diterima Front Office dan melindungi inventory dari expiry selama review. Untuk transfer bank, Front Office wajib memilih rekening KOOKA yang menerima dana dari daftar snapshot booking.
 - Action `REVIEW` memverifikasi atau menolak payment. Online reservation hanya menjadi confirmed/guaranteed setelah verified payment mencapai 100% required amount.
 - Action `VOID` membuat reversal folio untuk verified payment dan mengembalikan/menutup payment hold sesuai deadline.
 - Action `CANCEL` pada staff booking membatalkan reservation, melepaskan room/extra-bed claim, membatalkan reminder, dan mencatat alasan/audit. Nominal refund tetap diproses manual sesuai kebijakan.

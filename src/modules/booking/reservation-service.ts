@@ -14,7 +14,6 @@ import {
   inventoryClaims,
   inventoryDays,
   notificationMessages,
-  paymentInstructionVersions,
   policyAcknowledgements,
   policySets,
   policyVersions,
@@ -26,6 +25,7 @@ import {
   reservationAddons,
   reservationRoomNights,
   reservationRooms,
+  reservationPaymentInstructions,
   reservations,
   reservationStatusEvents,
 } from "../../db/schema";
@@ -43,10 +43,13 @@ import {
   normalizeEmail,
   stableRequestHash,
 } from "./domain";
+import {
+  publicPaymentInstruction,
+  resolveActivePaymentInstructions,
+} from "./payment-instructions";
 
 const ONLINE_PAYMENT_MS = 2 * 60 * 60 * 1000;
 const SAME_DAY_PAYMENT_MS = 60 * 60 * 1000;
-const REMINDER_LEAD_MS = 30 * 60 * 1000;
 
 interface ExtraBedSnapshot extends Record<string, unknown> {
   resourcePoolId: string | null;
@@ -153,51 +156,6 @@ async function paymentDeadline(
   return new Date(now.getTime() + duration);
 }
 
-async function createEmailMessage(
-  tx: IdempotencyTransaction,
-  input: {
-    propertyId: string;
-    reservationId: string;
-    recipient: string;
-    subject: string;
-    body: string;
-    scheduledAt: Date;
-    idempotencyKey: string;
-  },
-) {
-  const [message] = await tx
-    .insert(notificationMessages)
-    .values({
-      propertyId: input.propertyId,
-      reservationId: input.reservationId,
-      channel: "EMAIL",
-      recipient: input.recipient,
-      status: "QUEUED",
-      renderedSubject: input.subject,
-      renderedBody: input.body,
-      scheduledAt: input.scheduledAt,
-      idempotencyKey: input.idempotencyKey,
-    })
-    .returning({ id: notificationMessages.id });
-  if (!message) throw new Error("Failed to create notification message");
-  await enqueueOutboxEvent(
-    {
-      topic: "notification.email",
-      aggregateType: "notification_message",
-      aggregateId: message.id,
-      payload: {
-        messageId: message.id,
-        to: input.recipient,
-        subject: input.subject,
-        text: input.body,
-      },
-      availableAt: input.scheduledAt,
-    },
-    tx,
-  );
-  return message.id;
-}
-
 export async function createReservation(params: {
   propertyId: string;
   input: CreateReservationRequest;
@@ -251,6 +209,8 @@ export async function createReservation(params: {
       if (!quote || quote.status !== "ACTIVE" || quote.expiresAt <= now) {
         throw new AppError("CONFLICT", "Quote has expired or is unavailable");
       }
+      const reservationLanguage: "id" | "en" =
+        quote.language === "en" ? "en" : "id";
       const quoteRooms = await tx
         .select()
         .from(bookingQuoteRooms)
@@ -296,30 +256,12 @@ export async function createReservation(params: {
         .limit(1);
       if (!ratePlan)
         throw new AppError("CONFLICT", "Rate plan snapshot is missing");
-      let paymentInstruction:
-        typeof paymentInstructionVersions.$inferSelect | undefined;
-      if (ratePlan.paymentInstructionSetId) {
-        const versions = await tx
-          .select()
-          .from(paymentInstructionVersions)
-          .where(
-            and(
-              eq(
-                paymentInstructionVersions.instructionSetId,
-                ratePlan.paymentInstructionSetId,
-              ),
-              inArray(paymentInstructionVersions.lifecycleStatus, [
-                "ACTIVE",
-                "SCHEDULED",
-              ]),
-            ),
-          )
-          .orderBy(desc(paymentInstructionVersions.effectiveFrom));
-        paymentInstruction = versions.find((version) =>
-          isEffective(version, now),
-        );
-      }
-      if (input.source === "ONLINE" && !paymentInstruction) {
+      const paymentInstructions = await resolveActivePaymentInstructions(
+        tx,
+        params.propertyId,
+        now,
+      );
+      if (input.source === "ONLINE" && paymentInstructions.length === 0) {
         throw new AppError("CONFLICT", "Payment instruction is not configured");
       }
       let cancellationPolicy: typeof policyVersions.$inferSelect | undefined;
@@ -424,7 +366,9 @@ export async function createReservation(params: {
           exchangeRateSnapshotId: quote.exchangeRateSnapshotId,
           exchangeRate: null,
           quoteId: quote.id,
-          paymentInstructionVersionId: paymentInstruction?.id ?? null,
+          // Retained as a compatibility pointer for existing reports. The
+          // authoritative booking snapshot is the multi-row table below.
+          paymentInstructionVersionId: paymentInstructions[0]?.id ?? null,
           cancellationPolicyVersionId: cancellationPolicy?.id ?? null,
           houseRulesVersionId: houseRules?.id ?? null,
           paymentDeadlineAt: deadline,
@@ -440,6 +384,16 @@ export async function createReservation(params: {
         })
         .returning({ id: reservations.id });
       if (!reservation) throw new Error("Failed to create reservation");
+      if (paymentInstructions.length) {
+        await tx.insert(reservationPaymentInstructions).values(
+          paymentInstructions.map((instruction, index) => ({
+            reservationId: reservation.id,
+            paymentInstructionVersionId: instruction.id,
+            displayOrder: index + 1,
+            createdByUserId: params.session?.user.id ?? null,
+          })),
+        );
+      }
       await tx.insert(reservationStatusEvents).values({
         reservationId: reservation.id,
         action: "CREATE",
@@ -771,40 +725,7 @@ export async function createReservation(params: {
         }
       }
 
-      if (input.source === "ONLINE" && deadline && paymentInstruction) {
-        const instructionText =
-          quote.language === "en"
-            ? paymentInstruction.instructionEn
-            : paymentInstruction.instructionId;
-        const baseUrl = process.env.PUBLIC_APP_URL ?? "http://localhost:3000";
-        const body = `${quote.language === "en" ? "Complete your KOOKA Residence booking" : "Selesaikan booking KOOKA Residence"}\n\nBooking code: ${bookingCode}\nOfficial total: IDR ${totalIdr.toLocaleString("id-ID")}\nDeadline: ${deadline.toISOString()}\nBank: ${paymentInstruction.bankName}\nAccount holder: ${paymentInstruction.accountHolder}\n${instructionText}\n\nOpen: ${baseUrl}/booking/lookup?code=${encodeURIComponent(bookingCode)}`;
-        await createEmailMessage(tx, {
-          propertyId: params.propertyId,
-          reservationId: reservation.id,
-          recipient: email,
-          subject:
-            quote.language === "en"
-              ? `Complete booking ${bookingCode}`
-              : `Selesaikan booking ${bookingCode}`,
-          body,
-          scheduledAt: now,
-          idempotencyKey: `reservation:${reservation.id}:payment-instruction`,
-        });
-        const reminderAt = new Date(
-          Math.max(now.getTime(), deadline.getTime() - REMINDER_LEAD_MS),
-        );
-        await createEmailMessage(tx, {
-          propertyId: params.propertyId,
-          reservationId: reservation.id,
-          recipient: email,
-          subject:
-            quote.language === "en"
-              ? `Payment deadline reminder ${bookingCode}`
-              : `Pengingat batas pembayaran ${bookingCode}`,
-          body: `${body}\n\n${quote.language === "en" ? "This is a payment-deadline reminder." : "Ini adalah pengingat batas waktu pembayaran."}`,
-          scheduledAt: reminderAt,
-          idempotencyKey: `reservation:${reservation.id}:payment-reminder`,
-        });
+      if (input.source === "ONLINE" && deadline && paymentInstructions.length) {
         await enqueueOutboxEvent(
           {
             topic: "booking.reservation-expire",
@@ -831,6 +752,7 @@ export async function createReservation(params: {
             roomCount: quoteRooms.length,
             totalIdr,
             requiredPaymentIdr,
+            paymentInstructionCount: paymentInstructions.length,
           },
           reason:
             input.source === "ONLINE"
@@ -850,19 +772,19 @@ export async function createReservation(params: {
           totalIdr,
           requiredPaymentIdr,
           paymentDeadlineAt: deadline?.toISOString() ?? null,
-          paymentInstruction: paymentInstruction
-            ? {
-                bankName: paymentInstruction.bankName,
-                accountHolder: paymentInstruction.accountHolder,
-                accountNumber: decryptSensitiveValue(
-                  paymentInstruction.accountNumberCiphertext,
-                ),
-                accountNumberLast4: paymentInstruction.accountNumberLast4,
-                instruction:
-                  quote.language === "en"
-                    ? paymentInstruction.instructionEn
-                    : paymentInstruction.instructionId,
-              }
+          paymentInstructions: paymentInstructions.map((instruction) =>
+            publicPaymentInstruction(
+              instruction,
+              reservationLanguage,
+              decryptSensitiveValue,
+            ),
+          ),
+          paymentInstruction: paymentInstructions[0]
+            ? publicPaymentInstruction(
+                paymentInstructions[0],
+                reservationLanguage,
+                decryptSensitiveValue,
+              )
             : null,
           rooms: reservationRoomResults,
         },
@@ -912,6 +834,20 @@ export async function cancelReservation(params: {
         throw new AppError("CONFLICT", "Reservation cannot be cancelled");
       }
       const now = new Date();
+      const activeStay = await tx.execute<{ id: string }>(sql`
+        select st.id
+        from room_stays st
+        join reservation_rooms rr on rr.id = st.reservation_room_id
+        where rr.reservation_id = ${reservation.id}
+          and st.status in ('IN_HOUSE', 'DUE_OUT')
+        limit 1
+        for update of st
+      `);
+      if (activeStay.rows.length)
+        throw new AppError(
+          "CONFLICT",
+          "Checked-in stays cannot be cancelled; use checkout and manual refund instead",
+        );
       await tx
         .update(reservations)
         .set({
@@ -967,6 +903,52 @@ export async function cancelReservation(params: {
           select id from reservation_rooms where reservation_id = ${reservation.id}
         ) and claim_status = 'ACTIVE'
       `);
+      const physicalRelease = await tx.execute<{
+        assignment_count: number;
+        night_count: number;
+        claim_count: number;
+      }>(sql`
+        with target_assignments as materialized (
+          select a.id
+          from room_assignments a
+          join room_stays st on st.id = a.room_stay_id
+          join reservation_rooms rr on rr.id = st.reservation_room_id
+          where rr.reservation_id = ${reservation.id}
+            and a.status in ('PLANNED', 'ACTIVE')
+        ), released_nights as (
+          update room_assignment_nights n
+          set released_at = ${now}
+          where n.room_assignment_id in (select id from target_assignments)
+            and n.released_at is null
+          returning n.id
+        ), released_claims as (
+          update room_unit_night_claims c
+          set claim_status = 'RELEASED', released_at = ${now}
+          where c.claim_type = 'ASSIGNMENT'
+            and c.source_id in (select id from target_assignments)
+            and c.claim_status = 'ACTIVE'
+          returning c.id
+        ), cancelled_assignments as (
+          update room_assignments a
+          set status = 'CANCELLED', updated_at = ${now},
+              updated_by_user_id = ${params.session.user.id}::uuid,
+              version = version + 1
+          where a.id in (select id from target_assignments)
+          returning a.id
+        ), cancelled_lines as (
+          update reservation_rooms rr
+          set line_status = 'CANCELLED', updated_at = ${now},
+              updated_by_user_id = ${params.session.user.id}::uuid,
+              version = version + 1
+          where rr.reservation_id = ${reservation.id}
+            and rr.line_status = 'ACTIVE'
+          returning rr.id
+        )
+        select
+          (select count(*)::int from cancelled_assignments) as assignment_count,
+          (select count(*)::int from released_nights) as night_count,
+          (select count(*)::int from released_claims) as claim_count
+      `);
       await tx
         .update(notificationMessages)
         .set({
@@ -980,21 +962,6 @@ export async function cancelReservation(params: {
             eq(notificationMessages.status, "QUEUED"),
           ),
         );
-      await createEmailMessage(tx, {
-        propertyId: params.propertyId,
-        reservationId: reservation.id,
-        recipient: reservation.bookerEmailNormalized,
-        subject:
-          reservation.language === "en"
-            ? `Booking cancelled ${reservation.bookingCode}`
-            : `Booking dibatalkan ${reservation.bookingCode}`,
-        body:
-          reservation.language === "en"
-            ? `Booking ${reservation.bookingCode} has been cancelled by Front Office. Any refund amount is handled manually according to the applicable policy.`
-            : `Booking ${reservation.bookingCode} telah dibatalkan oleh Front Office. Nominal refund ditangani manual sesuai kebijakan yang berlaku.`,
-        scheduledAt: now,
-        idempotencyKey: `reservation:${reservation.id}:cancelled`,
-      });
       await recordAuditEvent(
         {
           propertyId: params.propertyId,
@@ -1004,7 +971,14 @@ export async function cancelReservation(params: {
           targetType: "reservation",
           targetId: reservation.id,
           before: { status: reservation.status },
-          after: { status: "CANCELLED", releasedClaimCount: claims.length },
+          after: {
+            status: "CANCELLED",
+            releasedClaimCount: claims.length,
+            releasedPhysicalAssignments:
+              physicalRelease.rows[0]?.assignment_count ?? 0,
+            releasedPhysicalNights: physicalRelease.rows[0]?.night_count ?? 0,
+            releasedPhysicalClaims: physicalRelease.rows[0]?.claim_count ?? 0,
+          },
           reason,
           result: "SUCCESS",
         },

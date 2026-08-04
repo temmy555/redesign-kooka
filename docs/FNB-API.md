@@ -59,7 +59,8 @@ Seluruh action memerlukan staff login dan `Idempotency-Key`:
   - Nilai: `ALLOWED`, `NOT_ALLOWED`, atau `APPROVAL_REQUIRED`.
   - Memerlukan `stay.manage` dan reason.
 - `TRANSITION_ORDER`
-  - Alur: `ENTERED → ACCEPTED → PREPARING → READY → SERVED → COMPLETED`.
+  - Pesanan baru langsung masuk ke `Sedang diproses (PREPARING)`, lalu staf mengubahnya ke `Selesai/disajikan (SERVED)`.
+  - Status lama `ACCEPTED`, `READY`, dan `COMPLETED` tetap dikenali untuk kompatibilitas data serta audit, tetapi tidak menjadi langkah wajib di antarmuka.
 - `CANCEL_ORDER`
   - Dapat dilakukan dari status yang belum terminal dan membuat reversal bagi folio debit yang sudah ada.
 - `RECORD_STANDALONE_PAYMENT`

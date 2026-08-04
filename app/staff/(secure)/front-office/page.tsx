@@ -6,7 +6,15 @@ import styles from "../../staff.module.css";
 
 export const dynamic = "force-dynamic";
 
-export default async function FrontOfficePage() {
+export default async function FrontOfficePage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    tab?: string;
+    reservationRoomId?: string;
+    action?: string;
+  }>;
+}) {
   const session = await requireCurrentSession();
   const propertyId = await getActivePropertyId();
   const permissions = await getActivePermissionCodes(
@@ -24,5 +32,12 @@ export default async function FrontOfficePage() {
         <p>Akun Anda belum memiliki rangkaian permission Front Office.</p>
       </section>
     );
-  return <FrontOfficeDesk />;
+  const { tab, reservationRoomId, action } = await searchParams;
+  return (
+    <FrontOfficeDesk
+      initialStayAction={action}
+      initialReservationRoomId={reservationRoomId}
+      initialTab={tab}
+    />
+  );
 }

@@ -17,6 +17,18 @@ function simpleCleaningStatus(status: string) {
   return "Perlu dibersihkan";
 }
 
+export function nextCleaningTaskStatus(status: string) {
+  if (status === "IN_PROGRESS") return "CLEANED";
+  if (status === "CLEANED") return "INSPECTED";
+  return "IN_PROGRESS";
+}
+
+export function cleaningTaskActionLabel(status?: string) {
+  if (status === "IN_PROGRESS") return "Tandai selesai dibersihkan";
+  if (status === "CLEANED") return "Tandai sudah diperiksa";
+  return "Mulai bersihkan";
+}
+
 export default function HousekeepingActions({
   maintenance = [],
   rooms = [],
@@ -64,32 +76,21 @@ export default function HousekeepingActions({
     event.preventDefault();
     if (!selectedTask) return;
     try {
-      if (selectedTask.roomUnitId) {
-        await send({
-          action: "QUICK_ROOM_STATUS",
-          roomUnitId: selectedTask.roomUnitId,
-          operation: ["IN_PROGRESS", "CLEANED"].includes(selectedTask.status)
-            ? "MARK_READY"
-            : "START_CLEANING",
-        });
-      } else {
-        await send({
-          action: "TRANSITION_CLEANING",
-          cleaningTaskId: taskId,
-          toStatus:
-            selectedTask.status === "IN_PROGRESS"
-              ? "CLEANED"
-              : selectedTask.status === "CLEANED"
-                ? "INSPECTED"
-                : "IN_PROGRESS",
-        });
-      }
+      const toStatus = nextCleaningTaskStatus(selectedTask.status);
+      await send({
+        action: "TRANSITION_CLEANING",
+        cleaningTaskId: taskId,
+        toStatus,
+      });
       setTaskId("");
       setNotice({
         tone: "success",
-        message: ["IN_PROGRESS", "CLEANED"].includes(selectedTask.status)
-          ? "Pekerjaan selesai dan kamar sudah ditandai siap."
-          : "Pembersihan kamar dimulai.",
+        message:
+          toStatus === "IN_PROGRESS"
+            ? "Pembersihan kamar dimulai."
+            : toStatus === "CLEANED"
+              ? "Pembersihan selesai dan menunggu pemeriksaan."
+              : "Pekerjaan sudah diperiksa dan diselesaikan.",
       });
       router.refresh();
     } catch (error) {
@@ -125,10 +126,12 @@ export default function HousekeepingActions({
       await send({
         action: "CREATE_CLEANING",
         roomUnitId: newRoomId,
-        taskType: "DEEP_CLEAN",
+        taskType: "GUEST_REQUEST",
         priority: "NORMAL",
         entryPermission: "GRANTED",
-        notes: newTaskNotes || undefined,
+        notes:
+          newTaskNotes.trim() ||
+          "Tamu meminta kamar dibersihkan dan mengizinkan petugas masuk.",
       });
       setNewRoomId("");
       setNewTaskNotes("");
@@ -225,24 +228,25 @@ export default function HousekeepingActions({
                 label: task.roomUnitId
                   ? `Kamar ${rooms.find((room) => room.id === task.roomUnitId)?.roomNumber ?? "—"}`
                   : task.taskType.replaceAll("_", " "),
-                description: `${simpleCleaningStatus(task.status)}${task.notes ? ` · ${task.notes}` : ""}`,
+                description: `${task.taskType === "GUEST_REQUEST" ? "Permintaan tamu · " : ""}${simpleCleaningStatus(task.status)}${task.notes ? ` · ${task.notes}` : ""}`,
               }))}
               placeholder="Pilih kamar yang dikerjakan"
             />
           </label>
           <button className={styles.primaryButton} disabled={!taskId}>
-            {selectedTask &&
-            ["IN_PROGRESS", "CLEANED"].includes(selectedTask.status)
-              ? "Selesai & jadikan siap"
-              : "Mulai bersihkan"}
+            {cleaningTaskActionLabel(selectedTask?.status)}
           </button>
         </form>
       </section>
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
-          <h2>Tambahkan kamar untuk dibersihkan</h2>
+          <h2>Permintaan tamu untuk membersihkan kamar</h2>
         </div>
         <form className={styles.staffForm} onSubmit={createTask}>
+          <p className={styles.inlineHint}>
+            Gunakan fitur ini saat tamu yang masih menginap meminta kamarnya
+            dibersihkan dan sudah memberi izin petugas untuk masuk.
+          </p>
           <label>
             Kamar
             <KookaSelect
@@ -257,14 +261,15 @@ export default function HousekeepingActions({
             />
           </label>
           <label>
-            Catatan
+            Catatan permintaan (opsional)
             <textarea
+              placeholder="Contoh: tamu sedang pergi dan meminta kamar dibersihkan"
               value={newTaskNotes}
               onChange={(event) => setNewTaskNotes(event.target.value)}
             />
           </label>
           <button className={styles.primaryButton} disabled={!newRoomId}>
-            Tambahkan pekerjaan
+            Buat permintaan cleaning
           </button>
         </form>
       </section>

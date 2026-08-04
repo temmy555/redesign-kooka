@@ -33,6 +33,10 @@ function getTransporter(): Transporter {
     host: environment.SMTP_HOST,
     port: environment.SMTP_PORT,
     secure: environment.SMTP_PORT === 465,
+    auth:
+      environment.SMTP_USER && environment.SMTP_PASSWORD
+        ? { user: environment.SMTP_USER, pass: environment.SMTP_PASSWORD }
+        : undefined,
   });
   return transporter;
 }

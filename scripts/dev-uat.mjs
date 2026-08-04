@@ -2,12 +2,24 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { createDatabasePool, migrate } from "./lib/database-migrations.mjs";
 import { parseEnvironmentFile, projectRoot } from "./lib/local-environment.mjs";
-import { uatEnvironmentPath } from "./lib/uat-environment.mjs";
+import {
+  assertLocalUatTarget,
+  uatEnvironmentPath,
+} from "./lib/uat-environment.mjs";
 
 const environment = parseEnvironmentFile(
   await readFile(uatEnvironmentPath, "utf8"),
 );
+assertLocalUatTarget(environment.DATABASE_URL);
+const migrationPool = createDatabasePool(environment.DATABASE_URL, 1);
+try {
+  await migrate(migrationPool);
+  console.log("UAT database schema is up to date.");
+} finally {
+  await migrationPool.end();
+}
 const browserOrigin = new URL(environment.UAT_BROWSER_URL);
 const runtimeEnvironment = {
   ...process.env,

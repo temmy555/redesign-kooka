@@ -47,6 +47,7 @@ import {
   recordCheckinCapture,
   transitionStay,
 } from "../../src/modules/operations/stay-service";
+import { folios, reservations } from "../../src/db/schema";
 
 const U1 = "11111111-1111-4111-a111-111111111111";
 const U2 = "22222222-2222-4222-a222-222222222222";
@@ -65,6 +66,7 @@ function current(status: string) {
 const assignment = {
   id: U2,
   roomUnitId: U3,
+  effectiveFrom: new Date("2026-08-04T14:00:00+07:00"),
   housekeepingStatus: "INSPECTED",
   serviceabilityStatus: "IN_SERVICE",
 };
@@ -93,10 +95,12 @@ describe("stay service", () => {
     mocks.execute.mockResolvedValue({ rows: [{ count: "0" }] });
   });
 
-  it("checks in an assigned inspected room and activates occupancy", async () => {
+  it("checks in without an early or late arrival cutoff and activates occupancy", async () => {
     const setStay = vi.fn(() => chain());
+    const setAssignment = vi.fn(() => chain());
     mocks.update
       .mockReturnValueOnce({ ...chain(), set: setStay })
+      .mockReturnValueOnce({ ...chain(), set: setAssignment })
       .mockReturnValue(chain());
     mocks.select
       .mockReturnValueOnce(chain([current("DUE_IN")]))
@@ -115,8 +119,23 @@ describe("stay service", () => {
     expect(setStay).toHaveBeenCalledWith(
       expect.objectContaining({ chargePrivilege: "ALLOWED" }),
     );
+    expect(setAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "ACTIVE",
+        effectiveFrom: expect.any(Date),
+      }),
+    );
     expect(mocks.update).toHaveBeenCalledTimes(3);
     expect(mocks.recordAuditEvent).toHaveBeenCalledOnce();
+    expect(mocks.recordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: expect.objectContaining({
+          arrivalPolicy: "FLEXIBLE_FRONT_OFFICE",
+          arrivalTimeCutoffEnforced: false,
+        }),
+      }),
+      expect.anything(),
+    );
   });
 
   it("requires an explicit reason for a readiness override", async () => {
@@ -145,11 +164,16 @@ describe("stay service", () => {
     ).rejects.toThrow("requires a reason");
   });
 
-  it("checks out flexibly, creates turnover cleaning, and completes reservation", async () => {
+  it("checks out a settled folio, creates turnover cleaning, and completes reservation", async () => {
     mocks.select
       .mockReturnValueOnce(chain([current("IN_HOUSE")]))
       .mockReturnValueOnce(chain([assignment]))
       .mockReturnValueOnce(chain([{ id: U1, claimId: U2 }]));
+    mocks.execute
+      .mockResolvedValueOnce({
+        rows: [{ folioId: U1, folioStatus: "OPEN", balanceIdr: "0" }],
+      })
+      .mockResolvedValueOnce({ rows: [{ count: "0" }] });
 
     const result = await transitionStay({
       propertyId: U1,
@@ -163,7 +187,56 @@ describe("stay service", () => {
 
     expect(result.status).toBe("CHECKED_OUT");
     expect(mocks.insert).toHaveBeenCalled();
-    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the booking and tagihan open after only one multi-room line checks out", async () => {
+    mocks.select
+      .mockReturnValueOnce(chain([current("IN_HOUSE")]))
+      .mockReturnValueOnce(chain([assignment]))
+      .mockReturnValueOnce(chain([{ id: U1, claimId: U2 }]));
+    mocks.execute
+      .mockResolvedValueOnce({
+        rows: [{ folioId: U1, folioStatus: "OPEN", balanceIdr: "0" }],
+      })
+      .mockResolvedValueOnce({ rows: [{ count: "1" }] });
+
+    const result = await transitionStay({
+      propertyId: U1,
+      roomStayId: U2,
+      action: "CHECK_OUT",
+      reason: "One room departed; the second room remains in house",
+      departureOutcome: "CLEARED",
+      idempotencyKey: "checkout-multi-room-partial",
+      session,
+    });
+
+    expect(result.status).toBe("CHECKED_OUT");
+    expect(mocks.update).not.toHaveBeenCalledWith(reservations);
+    expect(mocks.update).not.toHaveBeenCalledWith(folios);
+  });
+
+  it("blocks checkout while room charges remain unpaid", async () => {
+    mocks.select
+      .mockReturnValueOnce(chain([current("IN_HOUSE")]))
+      .mockReturnValueOnce(chain([assignment]));
+    mocks.execute.mockResolvedValueOnce({
+      rows: [{ folioId: U1, folioStatus: "OPEN", balanceIdr: "120000.00" }],
+    });
+
+    await expect(
+      transitionStay({
+        propertyId: U1,
+        roomStayId: U2,
+        action: "CHECK_OUT",
+        reason: "Guest wants to leave",
+        departureOutcome: "CLEARED",
+        idempotencyKey: "checkout-unpaid",
+        session,
+      }),
+    ).rejects.toThrow("120.000");
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
   });
 
   it("retains a guaranteed no-show room until explicit release", async () => {
@@ -175,7 +248,7 @@ describe("stay service", () => {
       propertyId: U1,
       roomStayId: U2,
       action: "MARK_NO_SHOW",
-      reason: "Arrival cutoff reached; room remains guaranteed",
+      reason: "Front Office recorded no-show after contacting the guest",
       idempotencyKey: "no-show-1",
       session,
     });
