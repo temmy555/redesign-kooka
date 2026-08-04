@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DateField,
   FileField,
+  type SelectOption,
   KookaSelect,
   MoneyInput,
   ReasonDialog,
@@ -27,6 +28,14 @@ const areas = [
   ["attendance", "Absensi"],
   ["reports", "Laporan"],
 ] as const;
+
+const roleOptions: SelectOption[] = [
+  { value: "", label: "Tanpa role awal" },
+  { value: "OWNER", label: "Owner" },
+  { value: "FRONT_OFFICE", label: "Front Office" },
+  { value: "CLEANING", label: "Cleaning" },
+  { value: "FNB", label: "F&B" },
+] as SelectOption[];
 
 function key(action: string) {
   return `${action}:${crypto.randomUUID()}`;
@@ -168,14 +177,33 @@ export default function AdminWorkspace({
     if (granted.has("attendance.location.view"))
       endpoints.push(["attendance", "/api/staff/admin/attendance-locations"]);
     try {
-      const results = await Promise.all(
+      const settled = await Promise.allSettled(
         endpoints.map(async ([name, endpoint]) => {
           const response = await fetch(endpoint, { cache: "no-store" });
-          if (!response.ok) throw new Error(endpoint);
+          if (!response.ok) throw new Error(`${endpoint} -> ${response.status}`);
           return [name, await response.json()] as const;
         }),
       );
-      setData(Object.fromEntries(results));
+      const partial: Record<string, unknown> = {};
+      let failedCount = 0;
+      for (const item of settled) {
+        if (item.status === "fulfilled") {
+          const [name, responseData] = item.value;
+          partial[name] = responseData;
+          continue;
+        }
+        failedCount += 1;
+        console.error("Failed to load admin endpoint", item.reason);
+      }
+      setData(partial);
+      if (failedCount > 0) {
+        setNotice({
+          tone: "error",
+          message: "Sebagian data administrasi gagal dimuat, tetapi bagian lain tetap ditampilkan.",
+        });
+      } else {
+        setNotice(null);
+      }
     } catch {
       setNotice({
         tone: "error",
@@ -253,6 +281,8 @@ export default function AdminWorkspace({
           content={data.content}
           media={data.media}
           menu={data.menu}
+          canManageMedia={granted.has("cms.media.manage")}
+          canManageMenu={granted.has("commercial.manage")}
           load={load}
           setNotice={setNotice}
         />
@@ -2567,18 +2597,127 @@ function ContentAdmin({
   content,
   media,
   menu,
+  canManageMedia,
+  canManageMenu,
   load,
   setNotice,
 }: {
   content: unknown;
   media: unknown;
   menu: unknown;
+  canManageMedia: boolean;
+  canManageMenu: boolean;
   load: () => Promise<void>;
   setNotice: (notice: Notice) => void;
 }) {
   const pages = Array.isArray(content) ? (content as JsonRecord[]) : [];
   const assets = Array.isArray(media) ? (media as JsonRecord[]) : [];
-  const menuRows = Array.isArray(menu) ? (menu as JsonRecord[]) : [];
+  const menuRows = useMemo(
+    () => (Array.isArray(menu) ? (menu as JsonRecord[]) : []),
+    [menu],
+  );
+  const today = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }, []);
+  const menuCatalog = useMemo(() => {
+    const categories = new Map<
+      string,
+      {
+        categoryId: string;
+        categoryCode: string;
+        categoryNameId: string;
+        categoryNameEn: string;
+        categoryStatus: string;
+        items: Map<
+          string,
+          {
+            itemId: string;
+            itemCode: string;
+            itemStatus: string;
+            currentlyAvailable: boolean;
+            versions: JsonRecord[];
+            latestVersion?: JsonRecord;
+            activatableVersionId?: string;
+          }
+        >;
+      }
+    >();
+
+    for (const row of menuRows) {
+      const categoryId = String(row.categoryId ?? "");
+      if (!categoryId) continue;
+      let category = categories.get(categoryId);
+      if (!category) {
+        category = {
+          categoryId,
+          categoryCode: String(row.categoryCode ?? ""),
+          categoryNameId: String(row.categoryNameId ?? ""),
+          categoryNameEn: String(row.categoryNameEn ?? ""),
+          categoryStatus: String(row.categoryStatus ?? "DRAFT"),
+          items: new Map(),
+        };
+        categories.set(categoryId, category);
+      }
+
+      const itemId = String(row.itemId ?? "");
+      if (!itemId) continue;
+      let item = category.items.get(itemId);
+      if (!item) {
+        item = {
+          itemId,
+          itemCode: String(row.itemCode ?? ""),
+          itemStatus: String(row.itemStatus ?? "DRAFT"),
+          currentlyAvailable: Boolean(row.currentlyAvailable),
+          versions: [],
+        };
+        category.items.set(itemId, item);
+      }
+      if (row.versionId) item.versions.push(row);
+    }
+
+    const result = [];
+    for (const category of categories.values()) {
+      const items = [];
+      for (const item of category.items.values()) {
+        const versions = [...item.versions].sort(
+          (left, right) =>
+            Number(right.versionNumber ?? 0) - Number(left.versionNumber ?? 0),
+        );
+        const latestVersion = versions[0];
+        const activatableVersion = versions.find((candidate) =>
+          ["DRAFT", "SCHEDULED"].includes(
+            String(candidate.lifecycleStatus ?? ""),
+          ),
+        );
+        items.push({
+          ...item,
+          versions,
+          latestVersion,
+          activatableVersionId: String(
+            activatableVersion?.versionId ?? "",
+          ),
+        });
+      }
+      result.push({
+        ...category,
+        items: items.sort((first, second) =>
+          String(first.itemCode).localeCompare(String(second.itemCode), "id-ID"),
+        ),
+      });
+    }
+
+    return result.sort((first, second) =>
+      String(first.categoryNameId).localeCompare(
+        String(second.categoryNameId),
+        "id-ID",
+      ),
+    );
+  }, [menuRows]);
+  const menuCategoryOptions = menuCatalog.map((category) => ({
+    value: category.categoryId,
+    label: `${category.categoryNameId || category.categoryCode} (${category.categoryCode})`,
+  }));
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [altId, setAltId] = useState("");
@@ -2588,13 +2727,59 @@ function ContentAdmin({
   const [nameId, setNameId] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
+  const [newItemCategoryId, setNewItemCategoryId] = useState("");
+  const [newItemNameId, setNewItemNameId] = useState("");
+  const [newItemNameEn, setNewItemNameEn] = useState("");
+  const [newItemDescriptionId, setNewItemDescriptionId] = useState("");
+  const [newItemDescriptionEn, setNewItemDescriptionEn] = useState("");
+  const [newItemPrice, setNewItemPrice] = useState("");
+  const [newItemTaxProfileId, setNewItemTaxProfileId] = useState("");
+  const [newItemReason, setNewItemReason] = useState("Tambah item menu");
+  const [newItemEffectiveFrom, setNewItemEffectiveFrom] = useState(today);
+
   const [lifecycleRequest, setLifecycleRequest] = useState<{
     endpoint: string;
     body: JsonRecord;
   } | null>(null);
   const [lifecycleReason, setLifecycleReason] = useState("");
+  const selectedMenuCategoryId =
+    newItemCategoryId || menuCategoryOptions[0]?.value || "";
+  const autoGeneratedMenuItemCode = useMemo(() => {
+    const selectedCategory =
+      menuCatalog.find((category) => category.categoryId === selectedMenuCategoryId) ??
+      menuCatalog[0];
+    const categoryCode = String(
+      selectedCategory?.categoryCode ||
+        selectedCategory?.categoryNameId ||
+        "MENU",
+    )
+      .replace(/[^A-Z0-9]/giu, "")
+      .slice(0, 8);
+    const nameSeed = (newItemNameId || "ITEM")
+      .replace(/[^a-zA-Z0-9]/gu, "-")
+      .toUpperCase()
+      .slice(0, 14);
+    const dateSeed = new Date().toISOString().slice(2, 10).replaceAll("-", "");
+    const candidatePrefix = `${categoryCode || "MENU"}-${nameSeed || "ITEM"}-${dateSeed}`;
+    const existing = menuRows
+      .map((item) => String(item.itemCode ?? ""))
+      .filter((value) => value.startsWith(`${candidatePrefix}-`))
+      .map((value) => Number(value.replace(`${candidatePrefix}-`, "")))
+      .filter((value) => Number.isInteger(value) && value > 0)
+      .sort((first, second) => first - second);
+    const nextSeq = Number(existing.at(-1) ?? 0) + 1;
+    const seqSeed = String(nextSeq).padStart(4, "0").slice(-4);
+    return `${candidatePrefix}-${seqSeed}`;
+  }, [menuRows, menuCatalog, selectedMenuCategoryId, newItemNameId]);
   async function upload(event: React.FormEvent) {
     event.preventDefault();
+    if (!canManageMedia) {
+      setNotice({
+        tone: "error",
+        message: "Akses upload media belum aktif untuk role ini.",
+      });
+      return;
+    }
     if (!file) return;
     try {
       const form = new FormData();
@@ -2622,8 +2807,126 @@ function ContentAdmin({
       });
     }
   }
+  async function createMenuItem(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canManageMenu) {
+      setNotice({
+        tone: "error",
+        message: "Akses tambah item menu belum aktif untuk role ini.",
+      });
+      return;
+    }
+    const priceIdr = Number(newItemPrice.replace(/\D/gu, ""));
+    if (!selectedMenuCategoryId) {
+      setNotice({
+        tone: "error",
+        message: "Silakan pilih kategori menu terlebih dahulu.",
+      });
+      return;
+    }
+    const resolvedItemCode = autoGeneratedMenuItemCode;
+    if (!resolvedItemCode.trim()) {
+      setNotice({
+        tone: "error",
+        message: "Kode item tidak dapat dibuat, silakan isi nama item terlebih dahulu.",
+      });
+      return;
+    }
+    if (!Number.isInteger(priceIdr) || priceIdr < 0) {
+      setNotice({
+        tone: "error",
+        message: "Harga harus berupa angka nominal IDR yang valid.",
+      });
+      return;
+    }
+    try {
+      await post("/api/staff/admin/menu", {
+        action: "CREATE_ITEM_VERSION",
+        categoryId: selectedMenuCategoryId,
+        itemCode: resolvedItemCode,
+        nameId: newItemNameId,
+        nameEn: newItemNameEn,
+        descriptionId: newItemDescriptionId.trim() || undefined,
+        descriptionEn: newItemDescriptionEn.trim() || undefined,
+        priceIdr,
+        taxProfileVersionId: newItemTaxProfileId.trim() || undefined,
+        effectiveFrom: newItemEffectiveFrom,
+        reason: newItemReason.trim() || "Tambah item menu",
+      });
+      setNotice({
+        tone: "success",
+        message: "Item menu berhasil dibuat (versi baru menunggu publish).",
+      });
+      setNewItemNameId("");
+      setNewItemNameEn("");
+      setNewItemDescriptionId("");
+      setNewItemDescriptionEn("");
+      setNewItemPrice("");
+      setNewItemTaxProfileId("");
+      setNewItemReason("Tambah item menu");
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Item menu tidak dapat dibuat.",
+      });
+    }
+  }
+  async function activateMenuItemVersion(versionId: string) {
+    try {
+      await post("/api/staff/admin/menu", {
+        action: "ACTIVATE_ITEM_VERSION",
+        versionId,
+        reason: "Aktifkan versi menu",
+      });
+      setNotice({
+        tone: "success",
+        message: "Versi menu berhasil diaktifkan.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Status menu tidak dapat diaktifkan.",
+      });
+    }
+  }
+  async function toggleMenuItemAvailability(itemId: string, available: boolean) {
+    try {
+      await post("/api/staff/admin/menu", {
+        action: "SET_AVAILABILITY",
+        menuItemId: itemId,
+        available,
+        reason: `Perubahan ketersediaan menu ${itemId}`,
+      });
+      setNotice({
+        tone: "success",
+        message: "Ketersediaan menu berhasil diperbarui.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Status ketersediaan menu tidak dapat diubah.",
+      });
+    }
+  }
   async function createCategory(event: React.FormEvent) {
     event.preventDefault();
+    if (!canManageMenu) {
+      setNotice({
+        tone: "error",
+        message: "Akses tambah kategori belum aktif untuk role ini.",
+      });
+      return;
+    }
     try {
       await post("/api/staff/admin/menu", {
         action: "CREATE_CATEGORY",
@@ -2636,6 +2939,10 @@ function ContentAdmin({
         tone: "success",
         message: "Kategori menu F&B berhasil dibuat.",
       });
+      setCategoryCode("");
+      setNameId("");
+      setNameEn("");
+      setSortOrder("0");
       await load();
     } catch (error) {
       setNotice({
@@ -2671,7 +2978,15 @@ function ContentAdmin({
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
           <h2>Upload foto asli</h2>
+          {!canManageMedia ? (
+            <span className={styles.countPill}>Read only</span>
+          ) : null}
         </div>
+        {!canManageMedia ? (
+          <p className={styles.formHint}>
+            Upload media memerlukan izin pengelola konten.
+          </p>
+        ) : null}
         <form className={styles.staffForm} onSubmit={upload}>
           <FileField
             accept="image/jpeg,image/png"
@@ -2713,13 +3028,27 @@ function ContentAdmin({
               onChange={(event) => setRights(event.target.value)}
             />
           </label>
-          <button className={styles.primaryButton}>Upload ke galeri</button>
+          <button
+            className={styles.primaryButton}
+            disabled={!canManageMedia}
+            type="submit"
+          >
+            Upload ke galeri
+          </button>
         </form>
       </section>
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
           <h2>Kategori menu</h2>
+          {!canManageMenu ? (
+            <span className={styles.countPill}>Read only</span>
+          ) : null}
         </div>
+        {!canManageMenu ? (
+          <p className={styles.formHint}>
+            Menambah kategori menu memerlukan role komersial manajemen.
+          </p>
+        ) : null}
         <form className={styles.staffForm} onSubmit={createCategory}>
           <div className={styles.formGrid}>
             <label>
@@ -2758,7 +3087,122 @@ function ContentAdmin({
               />
             </label>
           </div>
-          <button className={styles.primaryButton}>Tambah kategori</button>
+          <button
+            className={styles.primaryButton}
+            disabled={!canManageMenu}
+            type="submit"
+          >
+            Tambah kategori
+          </button>
+        </form>
+      </section>
+      <section className={styles.formCard}>
+        <div className={styles.panelHeader}>
+          <h2>Tambah menu F&B</h2>
+          <span className={styles.countPill}>
+            {menuCategoryOptions.length} kategori
+          </span>
+        </div>
+        {!canManageMenu ? (
+          <p className={styles.formHint}>
+            Menambah item menu memerlukan role komersial manajemen.
+          </p>
+        ) : null}
+        <form className={styles.staffForm} onSubmit={createMenuItem}>
+          <label>
+            Kategori
+            <KookaSelect
+              ariaLabel="Kategori menu"
+              disabled={!canManageMenu}
+              emptyMessage="Belum ada kategori menu"
+              onChange={setNewItemCategoryId}
+              options={menuCategoryOptions}
+              value={selectedMenuCategoryId}
+            />
+          </label>
+          <div className={styles.formGrid}>
+            <label>
+              Kode item
+              <input
+                readOnly
+                value={autoGeneratedMenuItemCode}
+                title="Kode item dibuat otomatis."
+              />
+            </label>
+            <label>
+              Nama Indonesia
+              <input
+                required
+                value={newItemNameId}
+                onChange={(event) => setNewItemNameId(event.target.value)}
+              />
+            </label>
+            <label>
+              Nama English
+              <input
+                required
+                value={newItemNameEn}
+                onChange={(event) => setNewItemNameEn(event.target.value)}
+              />
+            </label>
+            <label>
+              Harga (IDR)
+              <MoneyInput
+                ariaLabel="Harga menu"
+                onChange={setNewItemPrice}
+                required
+                value={newItemPrice}
+              />
+            </label>
+          </div>
+          <label>
+            Deskripsi Indonesia
+            <textarea
+              rows={2}
+              value={newItemDescriptionId}
+              onChange={(event) => setNewItemDescriptionId(event.target.value)}
+            />
+          </label>
+          <label>
+            Deskripsi English
+            <textarea
+              rows={2}
+              value={newItemDescriptionEn}
+              onChange={(event) => setNewItemDescriptionEn(event.target.value)}
+            />
+          </label>
+          <label>
+            ID versi pajak profil (opsional)
+            <input
+              value={newItemTaxProfileId}
+              onChange={(event) => setNewItemTaxProfileId(event.target.value)}
+            />
+          </label>
+          <div className={styles.formGrid}>
+            <label>
+              Berlaku mulai
+              <DateField
+                ariaLabel="Berlaku mulai"
+                onChange={setNewItemEffectiveFrom}
+                value={newItemEffectiveFrom}
+              />
+            </label>
+          </div>
+          <label>
+            Alasan
+            <textarea
+              rows={2}
+              value={newItemReason}
+              onChange={(event) => setNewItemReason(event.target.value)}
+            />
+          </label>
+          <button
+            className={styles.primaryButton}
+            disabled={!canManageMenu}
+            type="submit"
+          >
+            Tambah item menu
+          </button>
         </form>
       </section>
       <section className={`${styles.panel} ${styles.actionGridWide}`}>
@@ -2818,10 +3262,147 @@ function ContentAdmin({
       </section>
       <section className={`${styles.panel} ${styles.actionGridWide}`}>
         <div className={styles.panelHeader}>
-          <h2>Ringkasan media & menu</h2>
+          <h2>Ringkasan media</h2>
           <span className={styles.countPill}>
-            {assets.length} media · {menuRows.length} menu
+            {assets.length} media · {menuCatalog.reduce(
+              (total, category) => total + category.items.length,
+              0,
+            )}{" "}
+            item menu
           </span>
+        </div>
+        {!canManageMedia ? (
+          <p className={styles.emptyCompact}>
+            Akses katalog media tidak aktif di role ini. Mintalah hak{' '}
+            <strong>cms.media.manage</strong> untuk melihat data media.
+          </p>
+        ) : null}
+        {assets.length ? (
+          <div className={styles.masterList}>
+            {assets.map((asset) => (
+              <article key={`${String(asset.id)}`}>
+                <div>
+                  <strong>{String(asset.title || "Foto tanpa judul")}</strong>
+                  <small>
+                    {String(asset.mediaType || "MEDIA")} · status:{" "}
+                    {String(asset.status || "DRAFT")} · scan:{" "}
+                    {String(asset.scanStatus || "UNKNOWN")}
+                  </small>
+                  <small>
+                    {Boolean(asset.authenticPropertyMedia)
+                      ? "Foto asli properti"
+                      : "Foto non-properti"}
+                  </small>
+                </div>
+                <span className={styles.statusPill}>
+                  {String(asset.mimeType || "N/A")}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.emptyCompact}>Belum ada media aktif.</p>
+        )}
+      </section>
+      <section className={`${styles.panel} ${styles.actionGridWide}`}>
+        <div className={styles.panelHeader}>
+          <h2>Katalog menu</h2>
+          <span className={styles.countPill}>
+            {menuCatalog.length} kategori ·{" "}
+            {menuCatalog.reduce((total, category) => total + category.items.length, 0)} item
+          </span>
+        </div>
+        {!canManageMenu ? (
+          <p className={styles.emptyCompact}>
+            Anda tidak memiliki hak ubah menu (commercial.manage), jadi mode lihat
+            saja.
+          </p>
+        ) : null}
+        <div className={styles.commercialGroups}>
+          {menuCatalog.length ? (
+            menuCatalog.map((category) => (
+              <section className={styles.commercialGroup} key={category.categoryId}>
+                <div className={styles.commercialGroupHeader}>
+                  <h3>
+                    {category.categoryNameId || category.categoryNameEn || category.categoryCode}
+                  </h3>
+                  <small>{category.items.length} item</small>
+                </div>
+                {category.items.length ? (
+                  <div className={styles.masterList}>
+                    {category.items.map((item) => {
+                      const latest = item.latestVersion;
+                      if (!latest) return null;
+                      return (
+                        <article key={item.itemId}>
+                          <div>
+                            <strong>
+                              {String(latest.nameId ?? item.itemCode)}
+                            </strong>
+                            <small>{String(item.itemCode)}</small>
+                            <small>
+                              {idr(latest.priceIdr)} · status{" "}
+                              {String(latest.lifecycleStatus ?? item.itemStatus)}
+                            </small>
+                            <small>
+                              Berlaku: {dateLabel(latest.effectiveFrom)} —{" "}
+                              {latest.effectiveTo
+                                ? dateLabel(latest.effectiveTo)
+                                : "sampai selamanya"}
+                            </small>
+                          </div>
+                          <div className={styles.commercialActions}>
+                            <span className={styles.statusPill}>
+                              {item.currentlyAvailable
+                                ? "Tersedia"
+                                : "Tidak tersedia"}
+                            </span>
+                            {canManageMenu ? (
+                              <>
+                                <button
+                                  className={styles.secondaryButton}
+                                  onClick={() =>
+                                    void toggleMenuItemAvailability(
+                                      item.itemId,
+                                      !item.currentlyAvailable,
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  {item.currentlyAvailable
+                                    ? "Nonaktifkan"
+                                    : "Aktifkan"}
+                                </button>
+                                {item.activatableVersionId ? (
+                                  <button
+                                    className={styles.secondaryButton}
+                                    onClick={() =>
+                                      void activateMenuItemVersion(
+                                        item.activatableVersionId!,
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    Aktifkan versi
+                                  </button>
+                                ) : null}
+                              </>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className={styles.emptyCompact}>
+                    Kategori ini belum memiliki menu.
+                  </p>
+                )}
+              </section>
+            ))
+          ) : (
+            <p className={styles.emptyCompact}>Belum ada menu yang terdaftar.</p>
+          )}
         </div>
       </section>
       <ReasonDialog
@@ -2868,6 +3449,14 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
   const [targetUserId, setTargetUserId] = useState("");
   const [roleCode, setRoleCode] = useState("FRONT_OFFICE");
   const [reason, setReason] = useState("");
+  const [newStaffName, setNewStaffName] = useState("");
+  const [newStaffEmail, setNewStaffEmail] = useState("");
+  const [newStaffPassword, setNewStaffPassword] = useState("");
+  const [newStaffEmployeeCode, setNewStaffEmployeeCode] = useState("");
+  const [newStaffDisplayName, setNewStaffDisplayName] = useState("");
+  const [newStaffRoleCode, setNewStaffRoleCode] = useState("");
+  const [newStaffReason, setNewStaffReason] = useState("");
+  const [isCreatingStaff, setIsCreatingStaff] = useState(false);
   async function loadAudit(page: number, pageSize: number) {
     try {
       const query = new URLSearchParams({
@@ -2919,8 +3508,136 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
       });
     }
   }
+
+  async function createStaff(event: React.FormEvent) {
+    event.preventDefault();
+    if (isCreatingStaff) return;
+    setIsCreatingStaff(true);
+    try {
+      const payload: JsonRecord = {
+        action: "CREATE_STAFF",
+        name: newStaffName.trim(),
+        email: newStaffEmail.trim(),
+        password: newStaffPassword,
+        employeeCode: newStaffEmployeeCode.trim(),
+        reason: newStaffReason.trim() || "Provisioning staf baru",
+      };
+      if (newStaffDisplayName.trim()) {
+        payload.displayName = newStaffDisplayName.trim();
+      }
+      if (newStaffRoleCode) {
+        payload.roleCode = newStaffRoleCode;
+      }
+      await post("/api/staff/admin/users", payload);
+      setNotice({
+        tone: "success",
+        message:
+          "Staf baru berhasil dibuat dan dapat login dengan email serta kata sandi.",
+      });
+      setNewStaffName("");
+      setNewStaffEmail("");
+      setNewStaffPassword("");
+      setNewStaffEmployeeCode("");
+      setNewStaffDisplayName("");
+      setNewStaffRoleCode("");
+      setNewStaffReason("");
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Gagal membuat staf baru.",
+      });
+    } finally {
+      setIsCreatingStaff(false);
+    }
+  }
+
   return (
     <div className={styles.actionGrid}>
+      <section className={styles.formCard}>
+        <div className={styles.panelHeader}>
+          <h2>Buat staf baru</h2>
+          <span className={styles.countPill}>Role awal opsional</span>
+        </div>
+        <form className={styles.staffForm} onSubmit={createStaff}>
+          <label>
+            Nama
+            <input
+              required
+              maxLength={160}
+              value={newStaffName}
+              onChange={(event) => setNewStaffName(event.target.value)}
+            />
+          </label>
+          <label>
+            Nama tampilan (opsional)
+            <input
+              value={newStaffDisplayName}
+              maxLength={160}
+              onChange={(event) => setNewStaffDisplayName(event.target.value)}
+            />
+          </label>
+          <label>
+            Email
+            <input
+              required
+              maxLength={320}
+              type="email"
+              value={newStaffEmail}
+              onChange={(event) => setNewStaffEmail(event.target.value)}
+            />
+          </label>
+          <label>
+            Kata sandi (min 12)
+            <input
+              required
+              minLength={12}
+              maxLength={128}
+              type="password"
+              autoComplete="new-password"
+              value={newStaffPassword}
+              onChange={(event) => setNewStaffPassword(event.target.value)}
+            />
+          </label>
+          <label>
+            Kode staf
+            <input
+              required
+              maxLength={40}
+              value={newStaffEmployeeCode}
+              onChange={(event) => setNewStaffEmployeeCode(event.target.value)}
+            />
+          </label>
+          <label>
+            Role awal (opsional)
+            <KookaSelect
+              ariaLabel="Role awal staf"
+              value={newStaffRoleCode}
+              onChange={setNewStaffRoleCode}
+              options={roleOptions}
+              placeholder="Tanpa role awal"
+            />
+          </label>
+          <label>
+            Alasan
+            <textarea
+              maxLength={500}
+              value={newStaffReason}
+              onChange={(event) => setNewStaffReason(event.target.value)}
+            />
+          </label>
+          <div className={styles.formActions}>
+            <button
+              className={styles.primaryButton}
+              type="submit"
+              disabled={isCreatingStaff}
+            >
+              {isCreatingStaff ? "Membuat..." : "Buat akun staf"}
+            </button>
+          </div>
+        </form>
+      </section>
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
           <h2>Role staf</h2>

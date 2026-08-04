@@ -146,6 +146,63 @@ docker compose --env-file .env.production -f infra/compose.production.yaml logs 
 docker compose --env-file .env.production -f infra/compose.production.yaml logs -f worker
 ```
 
+### 8.1 Buat akun Owner pertama
+
+Migration menyiapkan tabel login, role, dan permission, tetapi tidak otomatis membuat akun production. Akun pertama dibuat sekali saja lewat bootstrap Owner.
+
+Tambahkan token sementara di `.env.production`:
+
+```bash
+openssl rand -hex 32
+nano .env.production
+```
+
+Isi:
+
+```bash
+OWNER_BOOTSTRAP_TOKEN=hasil-token-dari-openssl
+```
+
+Restart aplikasi agar token terbaca:
+
+```bash
+docker compose --env-file .env.production -f infra/compose.production.yaml up -d app worker
+```
+
+Buat akun Owner:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/setup/bootstrap-owner \
+  -H "Authorization: Bearer hasil-token-dari-openssl" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Temmy Kurniawan",
+    "email": "email-owner@domain.com",
+    "password": "password-minimal-12-karakter",
+    "employeeCode": "OWNER-001",
+    "propertyCode": "KOOKA-SBY",
+    "propertyName": "KOOKA Residence Surabaya"
+  }'
+```
+
+Jika berhasil, response berisi:
+
+```json
+{"status":"owner_bootstrapped"}
+```
+
+Setelah akun berhasil dibuat, hapus lagi `OWNER_BOOTSTRAP_TOKEN` dari `.env.production`, lalu restart:
+
+```bash
+docker compose --env-file .env.production -f infra/compose.production.yaml up -d app worker
+```
+
+Setelah itu login melalui:
+
+```text
+https://kookaresidencesby.com/staff/login
+```
+
 ## 9. Setup Nginx
 
 Install Nginx dan Certbot:
@@ -205,7 +262,80 @@ Setelah DNS mengarah, jalankan SSL:
 sudo certbot --nginx -d kookaresidencesby.com -d www.kookaresidencesby.com
 ```
 
-## 11. Smoke test setelah deploy
+## 11. Jika website timeout setelah DNS benar
+
+Jika browser menampilkan `ERR_CONNECTION_TIMED_OUT`, biasanya request belum masuk ke Nginx/server. Cek berurutan dari server AWS:
+
+### 11.1 Pastikan app Docker hidup
+
+```bash
+cd ~/apps/redesign-kooka
+docker compose --env-file .env.production -f infra/compose.production.yaml ps
+docker compose --env-file .env.production -f infra/compose.production.yaml logs --tail=80 app
+docker compose --env-file .env.production -f infra/compose.production.yaml logs --tail=80 worker
+```
+
+Status `app`, `worker`, dan `postgres` seharusnya `running` atau `healthy`.
+
+### 11.2 Test app dari dalam server
+
+```bash
+curl -I http://127.0.0.1:3000
+```
+
+Jika ini gagal, masalahnya ada di Docker/app. Jalankan:
+
+```bash
+docker compose --env-file .env.production -f infra/compose.production.yaml up -d app worker
+```
+
+### 11.3 Test Nginx dari dalam server
+
+```bash
+sudo nginx -t
+sudo systemctl status nginx --no-pager
+curl -I http://127.0.0.1
+```
+
+Jika `127.0.0.1:3000` berhasil tapi `127.0.0.1` gagal, masalahnya ada di Nginx config.
+
+### 11.4 Pastikan Nginx mendengar port 80/443
+
+```bash
+sudo ss -ltnp | grep -E ':80|:443|:3000'
+```
+
+Seharusnya terlihat:
+
+- Nginx di `:80`
+- Nginx di `:443` setelah SSL aktif
+- Docker/app di `127.0.0.1:3000`
+
+### 11.5 Cek firewall AWS Lightsail
+
+Di panel AWS Lightsail, buka instance → Networking. Pastikan IPv4 firewall mengizinkan:
+
+- `22 TCP`
+- `80 TCP`
+- `443 TCP`
+
+Jika `80` atau `443` belum dibuka, domain akan timeout walaupun DNS sudah benar.
+
+### 11.6 Cek firewall Ubuntu
+
+```bash
+sudo ufw status
+```
+
+Jika UFW aktif, pastikan:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw reload
+```
+
+## 12. Smoke test setelah deploy
 
 Cek minimal:
 
@@ -218,7 +348,7 @@ Cek minimal:
 - Invoice bisa diterbitkan
 - Attendance bisa buka kamera/geolocation di HTTPS
 
-## 12. Perintah operasional harian
+## 13. Perintah operasional harian
 
 Restart app:
 
@@ -241,7 +371,7 @@ Backup database manual:
 docker compose --env-file .env.production -f infra/compose.production.yaml exec postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > kooka-backup.sql
 ```
 
-## 13. Rollback sederhana
+## 14. Rollback sederhana
 
 Jika deploy baru bermasalah:
 
