@@ -40,10 +40,11 @@ function normalizeEmail(value: string) {
 }
 
 function isSameUserProfileConflict(
-  existingProfile: typeof employeeProfiles.$inferSelect | undefined,
+  existingProfile: { propertyId: string | null } | undefined | null,
   propertyId: string,
 ) {
-  return existingProfile && existingProfile.propertyId !== propertyId;
+  if (!existingProfile?.propertyId) return false;
+  return existingProfile.propertyId !== propertyId;
 }
 
 function failure(error: unknown) {
