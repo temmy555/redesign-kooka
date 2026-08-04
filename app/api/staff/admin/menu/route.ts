@@ -74,6 +74,20 @@ function failure(error: unknown) {
     );
   if (
     error instanceof Error &&
+    (/No active property is configured/.test(error.message) ||
+      /Multiple active properties found/.test(error.message))
+  )
+    return NextResponse.json(
+      {
+        error: {
+          code: "CONFLICT",
+          message: error.message,
+        },
+      },
+      { status: 409 },
+    );
+  if (
+    error instanceof Error &&
     error.message === "No authenticated staff session"
   )
     return NextResponse.json(

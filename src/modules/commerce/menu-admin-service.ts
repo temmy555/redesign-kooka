@@ -27,12 +27,16 @@ function code(value: string) {
   return normalized;
 }
 
-function isMenuSortColumnMissing(error: unknown): boolean {
+function isMenuSchemaLegacyRequired(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = String(error.message || "").toLowerCase();
+  const code = String((error as Error & { code?: string }).code || "");
   return (
-    /sort_order/.test(message) &&
-    (error as Error & { code?: string }).code === "42703"
+    code === "42703" ||
+    code === "42P01" ||
+    /relation .* does not exist/.test(message) ||
+    /column .* does not exist/.test(message) ||
+    /does not exist/.test(message)
   );
 }
 
@@ -68,6 +72,39 @@ function getMenuAdminOverviewLegacy(params: {
     .leftJoin(menuItemVersions, eq(menuItemVersions.menuItemId, menuItems.id))
     .where(eq(menuCategories.propertyId, params.propertyId))
     .orderBy(menuCategories.code, desc(menuItemVersions.versionNumber));
+}
+
+function getMenuAdminOverviewNoVersions(params: {
+  propertyId: string;
+  session: FnbStaffSession;
+}) {
+  return getDatabase()
+    .select({
+      categoryId: menuCategories.id,
+      categoryCode: menuCategories.code,
+      categoryNameId: menuCategories.nameId,
+      categoryNameEn: menuCategories.nameEn,
+      categoryStatus: menuCategories.status,
+      categorySortOrder: sql<number>`0`,
+      itemId: menuItems.id,
+      itemCode: menuItems.code,
+      itemSortOrder: sql<number>`0`,
+      itemStatus: menuItems.status,
+      currentlyAvailable: menuItems.currentlyAvailable,
+      versionId: sql<string | null>`null`,
+      versionNumber: sql<number | null>`null`,
+      nameId: sql<string | null>`null`,
+      nameEn: sql<string | null>`null`,
+      priceIdr: sql<number | null>`null`,
+      taxProfileVersionId: sql<string | null>`null`,
+      lifecycleStatus: sql<string | null>`null`,
+      effectiveFrom: sql<Date | null>`null`,
+      effectiveTo: sql<Date | null>`null`,
+    })
+    .from(menuCategories)
+    .leftJoin(menuItems, eq(menuItems.categoryId, menuCategories.id))
+    .where(eq(menuCategories.propertyId, params.propertyId))
+    .orderBy(menuCategories.code, menuItems.code);
 }
 
 export async function getMenuAdminOverview(params: {
@@ -109,8 +146,15 @@ export async function getMenuAdminOverview(params: {
         desc(menuItemVersions.versionNumber),
       );
   } catch (error) {
-    if (isMenuSortColumnMissing(error)) {
-      return getMenuAdminOverviewLegacy(params);
+    if (isMenuSchemaLegacyRequired(error)) {
+      try {
+        return await getMenuAdminOverviewLegacy(params);
+      } catch (legacyError) {
+        if (isMenuSchemaLegacyRequired(legacyError)) {
+          return getMenuAdminOverviewNoVersions(params);
+        }
+        throw legacyError;
+      }
     }
     throw error;
   }
