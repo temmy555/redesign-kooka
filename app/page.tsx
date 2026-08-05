@@ -12,7 +12,7 @@ export default async function HomePage({
   searchParams?: Promise<{ locale?: string | string[] }>;
 } = {}) {
   const query = searchParams ? await searchParams : undefined;
-  const locale = query?.locale === "en" ? "en" : "id";
+  const locale = query?.locale === "id" ? "id" : "en";
   let data = approvedBaselineLanding(locale);
   try {
     const propertyId = await getActivePropertyId();
