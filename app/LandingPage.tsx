@@ -297,7 +297,13 @@ export default function LandingPage({
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    const savedLocale = window.localStorage.getItem("kooka-language");
+    const isLocaleExplicit = window.localStorage.getItem(
+      "kooka-language-explicit",
+    );
+    const savedLocale =
+      isLocaleExplicit === "1"
+        ? window.localStorage.getItem("kooka-language")
+        : null;
     const savedCurrency = window.localStorage.getItem("kooka-currency");
     queueMicrotask(() => {
       if (savedLocale === "id" || savedLocale === "en") setLocale(savedLocale);
@@ -441,7 +447,10 @@ export default function LandingPage({
           >
             <PublicSelect
               ariaLabel="Language"
-              onChange={(value) => setLocale(value as PublicLocale)}
+              onChange={(value) => {
+                window.localStorage.setItem("kooka-language-explicit", "1");
+                setLocale(value as PublicLocale);
+              }}
               options={[
                 { value: "id", label: "ID" },
                 { value: "en", label: "EN" },
