@@ -15,6 +15,7 @@ import AttendanceLocationAdmin from "./AttendanceLocationAdmin";
 import PaginationControls from "./PaginationControls";
 import StaffNotice from "./StaffNotice";
 import styles from "../staff.module.css";
+import { auditActionLabel } from "../../../src/platform/audit-labels";
 import type { PaginationMeta } from "../../../src/platform/pagination";
 
 type JsonRecord = Record<string, unknown>;
@@ -47,36 +48,105 @@ const standardRoomAmenities = [
     iconKey: "garden-view",
     nameId: "Pemandangan taman",
     nameEn: "Garden view",
+    selectedByDefault: true,
   },
   {
     code: "ELECTRIC_KETTLE",
     iconKey: "electric-kettle",
     nameId: "Ketel listrik",
     nameEn: "Electric kettle",
+    selectedByDefault: true,
   },
   {
     code: "PRIVATE_BATHROOM",
     iconKey: "private-bathroom",
     nameId: "Kamar mandi pribadi",
     nameEn: "Private bathroom",
+    selectedByDefault: true,
   },
   {
     code: "SHOWER",
     iconKey: "shower",
     nameId: "Shower",
     nameEn: "Shower",
+    selectedByDefault: true,
   },
   {
     code: "AIR_CONDITIONING",
     iconKey: "air-conditioning",
     nameId: "AC",
     nameEn: "Air conditioning",
+    selectedByDefault: true,
   },
   {
     code: "NO_SMOKING",
     iconKey: "no-smoking",
     nameId: "Dilarang merokok",
     nameEn: "No smoking",
+    selectedByDefault: true,
+  },
+  {
+    code: "WORK_DINING_TABLE",
+    iconKey: "work-dining-table",
+    nameId: "Meja kerja / makan",
+    nameEn: "Work / dining table",
+    selectedByDefault: false,
+  },
+  {
+    code: "SIDE_TABLE",
+    iconKey: "side-table",
+    nameId: "Meja samping",
+    nameEn: "Side table",
+    selectedByDefault: false,
+  },
+  {
+    code: "SHELVES",
+    iconKey: "shelves",
+    nameId: "Rak",
+    nameEn: "Shelves",
+    selectedByDefault: false,
+  },
+  {
+    code: "MEZZANINE_SPACE",
+    iconKey: "mezzanine-space",
+    nameId: "Area mezzanine",
+    nameEn: "Mezzanine space",
+    selectedByDefault: false,
+  },
+  {
+    code: "ONE_SHARED_BATHROOM",
+    iconKey: "shared-bathroom",
+    nameId: "1 kamar mandi bersama",
+    nameEn: "1 shared bathroom",
+    selectedByDefault: false,
+  },
+  {
+    code: "PRIVATE_ROOM_ENTRANCE",
+    iconKey: "private-room-entrance",
+    nameId: "Setiap kamar memiliki pintu sendiri",
+    nameEn: "Each room has its own door",
+    selectedByDefault: false,
+  },
+  {
+    code: "SPACIOUS_CONNECTING_CORRIDOR",
+    iconKey: "spacious-corridor",
+    nameId: "Terhubung melalui koridor yang luas",
+    nameEn: "Connected by a spacious corridor",
+    selectedByDefault: false,
+  },
+  {
+    code: "TOWEL_RACK",
+    iconKey: "towel-rack",
+    nameId: "Rak handuk",
+    nameEn: "Towel rack",
+    selectedByDefault: false,
+  },
+  {
+    code: "STORAGE_RACK",
+    iconKey: "storage-rack",
+    nameId: "Rak penyimpanan",
+    nameEn: "Storage rack",
+    selectedByDefault: false,
   },
 ] as const;
 
@@ -1314,13 +1384,16 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
 
   async function applyStandardAmenities() {
     try {
-      const selectedIds: string[] = [];
+      const defaultAmenityIds: string[] = [];
+      let createdCount = 0;
       for (const preset of standardRoomAmenities) {
         const existing = amenityMasters.find(
           (amenity) => String(amenity.code) === preset.code,
         );
         if (existing) {
-          selectedIds.push(String(existing.id));
+          if (preset.selectedByDefault) {
+            defaultAmenityIds.push(String(existing.id));
+          }
           continue;
         }
         const created = await post("/api/staff/admin/room-master", {
@@ -1331,15 +1404,17 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
           nameEn: preset.nameEn,
           reason: "Menyiapkan fasilitas standar kamar",
         });
-        selectedIds.push(String(created.id));
+        createdCount += 1;
+        if (preset.selectedByDefault) {
+          defaultAmenityIds.push(String(created.id));
+        }
       }
       setSelectedAmenityIds((current) => [
-        ...new Set([...current, ...selectedIds]),
+        ...new Set([...current, ...defaultAmenityIds]),
       ]);
       setNotice({
         tone: "success",
-        message:
-          "Enam fasilitas standar sudah dipilih. Simpan jenis kamar untuk menampilkannya di landing page.",
+        message: `${createdCount ? `${createdCount} pilihan fasilitas baru berhasil ditambahkan. ` : ""}Enam fasilitas umum sudah dipilih. Centang fasilitas tambahan yang sesuai, lalu simpan jenis kamar.`,
       });
       await load();
     } catch (error) {
@@ -1632,10 +1707,11 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
             <legend>Fasilitas kamar</legend>
             <div className={styles.amenityQuickSetup}>
               <div>
-                <strong>Fasilitas umum kamar</strong>
+                <strong>15 pilihan fasilitas kamar</strong>
                 <small>
-                  Garden view, electric kettle, private bathroom, shower, AC,
-                  dan no smoking.
+                  Enam fasilitas umum akan dicentang otomatis. Fasilitas khusus
+                  seperti mezzanine dan shared bathroom dipilih sesuai jenis
+                  kamar.
                 </small>
               </div>
               <button
@@ -1643,7 +1719,7 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
                 onClick={() => void applyStandardAmenities()}
                 type="button"
               >
-                Gunakan 6 fasilitas standar
+                Siapkan 15 pilihan fasilitas
               </button>
             </div>
             {amenityMasters.length ? (
@@ -5404,7 +5480,7 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
           <input
             aria-label="Cari audit"
             onChange={(event) => setAuditSearch(event.target.value)}
-            placeholder="Cari aksi, target, atau alasan"
+            placeholder="Cari aktivitas, target, atau alasan"
             type="search"
             value={auditSearch}
           />
@@ -5417,7 +5493,7 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
             <thead>
               <tr>
                 <th>Waktu</th>
-                <th>Aksi</th>
+                <th>Aktivitas</th>
                 <th>Target</th>
                 <th>Hasil</th>
                 <th>Alasan</th>
@@ -5429,7 +5505,9 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
                   <td>
                     {new Date(String(event.createdAt)).toLocaleString("id-ID")}
                   </td>
-                  <td>{String(event.action)}</td>
+                  <td title={`Kode audit: ${String(event.action)}`}>
+                    {auditActionLabel(String(event.action))}
+                  </td>
                   <td>{human(String(event.targetType))}</td>
                   <td>
                     <span className={styles.statusPill}>

@@ -105,6 +105,9 @@ describe("booking availability, pricing, and customer lookup", () => {
     );
     expect(inventoryQuery.sql).toContain("unnest(array[$1, $2]::uuid[])");
     expect(inventoryQuery.sql).toContain("unnest(array[$3, $4]::date[])");
+    expect(inventoryQuery.sql).toContain("at time zone");
+    expect(inventoryQuery.sql).toContain("::date <= requested.stay_date");
+    expect(inventoryQuery.sql).toContain("::date > requested.stay_date");
     expect(inventoryQuery.sql).not.toContain("::text[]");
     expect(inventoryQuery.params.slice(0, 4)).toEqual([
       U2,

@@ -72,18 +72,33 @@ export async function ensureInventoryDays(
       select requested_room.room_type_id, requested_date.stay_date
       from unnest(array[${requestedRoomTypeIds}]::uuid[]) as requested_room(room_type_id)
       cross join unnest(array[${requestedStayDates}]::date[]) as requested_date(stay_date)
+    ), property_context as (
+      select timezone
+      from properties
+      where id = ${propertyId}::uuid
+      limit 1
     ), capacity as (
       select
         requested.room_type_id,
         requested.stay_date,
         count(distinct room_units.id)::integer as physical_capacity
       from requested
+      cross join property_context
       left join room_unit_type_periods
         on room_unit_type_periods.room_type_id = requested.room_type_id
-       and room_unit_type_periods.effective_from <= requested.stay_date::timestamptz
+       -- Room inventory is sold by the property's business date. A room mapped
+       -- at any time today must therefore be available for a same-day booking,
+       -- instead of becoming visible only after the next midnight boundary.
+       and (
+         room_unit_type_periods.effective_from
+           at time zone property_context.timezone
+       )::date <= requested.stay_date
        and (
          room_unit_type_periods.effective_to is null
-         or room_unit_type_periods.effective_to > requested.stay_date::timestamptz
+         or (
+           room_unit_type_periods.effective_to
+             at time zone property_context.timezone
+         )::date > requested.stay_date
        )
       left join room_units
         on room_units.id = room_unit_type_periods.room_unit_id
