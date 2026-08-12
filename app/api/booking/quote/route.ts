@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 
 const room = z.object({
   roomTypeId: z.string().uuid(),
+  ratePlanCode: z.string().trim().min(1).max(64).optional(),
   adults: z.number().int().min(1).max(20),
   children: z.number().int().min(0).max(20).default(0),
   infants: z.number().int().min(0).max(20).default(0),

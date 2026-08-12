@@ -7,6 +7,7 @@ import {
   reviewCommercialVersion,
 } from "../../../../../src/modules/configuration/commercial-lifecycle";
 import {
+  applyTaxProfileToActiveRatePlans,
   createDocumentProfileDraft,
   createDocumentSequence,
   createExchangeRateSnapshot,
@@ -77,6 +78,11 @@ const actionSchema = z.discriminatedUnion("action", [
     noTax: z.boolean(),
     effectiveFrom: z.coerce.date(),
     effectiveTo: nullableDate,
+    reason,
+  }),
+  z.object({
+    action: z.literal("APPLY_TAX_TO_ACTIVE_ROOM_RATES"),
+    taxProfileVersionId: z.string().uuid(),
     reason,
   }),
   z.object({
@@ -197,7 +203,13 @@ function errorResponse(error: unknown) {
   const normalized =
     error instanceof z.ZodError
       ? new AppError("VALIDATION_ERROR", "Invalid request")
-      : error;
+      : error instanceof Error &&
+          error.message.startsWith("DATA_ENCRYPTION_KEY")
+        ? new AppError(
+            "INTERNAL_ERROR",
+            "Konfigurasi keamanan data belum siap. Hubungi administrator.",
+          )
+        : error;
   const response = toErrorResponse(normalized);
   return NextResponse.json(response.body, { status: response.status });
 }
@@ -232,6 +244,13 @@ export async function POST(request: Request) {
     const requestContext = await context();
     const body = actionSchema.parse(await request.json());
     switch (body.action) {
+      case "APPLY_TAX_TO_ACTIVE_ROOM_RATES":
+        return NextResponse.json(
+          await applyTaxProfileToActiveRatePlans({
+            ...requestContext,
+            ...body,
+          }),
+        );
       case "CREATE_TAX_DRAFT":
         return NextResponse.json(
           await createTaxProfileDraft({ ...requestContext, ...body }),

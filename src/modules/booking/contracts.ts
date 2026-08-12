@@ -4,6 +4,7 @@ export type ReservationSource = "ONLINE" | "ADMIN_MANUAL";
 
 export interface RoomSelection {
   roomTypeId: string;
+  ratePlanCode?: string;
   adults: number;
   children: number;
   infants: number;

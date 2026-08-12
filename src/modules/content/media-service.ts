@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import { getDatabase } from "../../db";
 import {
@@ -16,8 +16,10 @@ import { recordAuditEvent } from "../../platform/audit";
 import { requirePermission } from "../../platform/authorization";
 import { AppError } from "../../platform/errors";
 import {
+  noopMalwareScanner,
   purgeStoredFile,
   readPublicStoredFile,
+  runMalwareScan,
   saveStoredFile,
 } from "../../platform/file-storage";
 import type { ContentStaffSession } from "./contracts";
@@ -49,7 +51,7 @@ export async function getMediaOverview(params: {
     params.propertyId,
     "cms.media.manage",
   );
-  return getDatabase()
+  const rows = await getDatabase()
     .select({
       id: mediaAssets.id,
       status: mediaAssets.status,
@@ -64,11 +66,45 @@ export async function getMediaOverview(params: {
       byteSize: storedFiles.byteSize,
       scanStatus: storedFiles.scanStatus,
       createdAt: mediaAssets.createdAt,
+      usageId: mediaUsages.id,
+      usageType: mediaUsages.usageType,
+      targetId: mediaUsages.targetId,
+      sortOrder: mediaUsages.sortOrder,
     })
     .from(mediaAssets)
     .innerJoin(storedFiles, eq(storedFiles.id, mediaAssets.fileId))
+    .leftJoin(mediaUsages, eq(mediaUsages.mediaAssetId, mediaAssets.id))
     .where(eq(mediaAssets.propertyId, params.propertyId))
     .orderBy(desc(mediaAssets.createdAt));
+
+  const assets = new Map<
+    string,
+    Omit<
+      (typeof rows)[number],
+      "usageId" | "usageType" | "targetId" | "sortOrder"
+    > & {
+      usages: Array<{
+        id: string;
+        usageType: string;
+        targetId: string;
+        sortOrder: number;
+      }>;
+    }
+  >();
+  for (const row of rows) {
+    const { usageId, usageType, targetId, sortOrder, ...asset } = row;
+    const current = assets.get(row.id) ?? { ...asset, usages: [] };
+    if (usageId && usageType && targetId) {
+      current.usages.push({
+        id: usageId,
+        usageType,
+        targetId,
+        sortOrder: sortOrder ?? 0,
+      });
+    }
+    assets.set(row.id, current);
+  }
+  return [...assets.values()];
 }
 
 export async function uploadCmsMedia(params: {
@@ -111,6 +147,13 @@ export async function uploadCmsMedia(params: {
     actorUserId: params.session.user.id,
   });
   try {
+    const scanStatus = await runMalwareScan(file.id, noopMalwareScanner);
+    if (scanStatus !== "CLEAN") {
+      throw new AppError(
+        "CONFLICT",
+        "Uploaded media did not pass file inspection",
+      );
+    }
     return await getDatabase().transaction(async (tx) => {
       const [asset] = await tx
         .insert(mediaAssets)
@@ -143,13 +186,13 @@ export async function uploadCmsMedia(params: {
             fileId: file.id,
             mimeType: params.mimeType,
             authenticPropertyMedia: params.metadata.authenticPropertyMedia,
-            scanStatus: file.scanStatus,
+            scanStatus,
           },
           result: "SUCCESS",
         },
         tx,
       );
-      return { id: asset.id, fileId: file.id, scanStatus: file.scanStatus };
+      return { id: asset.id, fileId: file.id, scanStatus };
     });
   } catch (error) {
     await purgeStoredFile(file.id, params.session.user.id).catch(
@@ -197,8 +240,12 @@ export async function publishCmsMedia(params: {
   if (asset.status !== "DRAFT") {
     throw new AppError("CONFLICT", "Only draft media can be published");
   }
+  const scanStatus =
+    asset.scanStatus === "PENDING"
+      ? await runMalwareScan(asset.fileId, noopMalwareScanner)
+      : asset.scanStatus;
   if (
-    asset.scanStatus !== "CLEAN" ||
+    scanStatus !== "CLEAN" ||
     asset.purgedAt ||
     !asset.rightsSource ||
     !asset.altId ||
@@ -394,6 +441,90 @@ export async function linkCmsMedia(params: {
       usageType: params.usageType,
       targetId: params.targetId,
       sortOrder: params.sortOrder,
+    };
+  });
+}
+
+export async function setRoomTypeGallery(params: {
+  session: ContentStaffSession;
+  propertyId: string;
+  roomTypeId: string;
+  assetIds: string[];
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "cms.media.manage",
+  );
+  const assetIds = [...new Set(params.assetIds)];
+  if (!assetIds.length || assetIds.length > 20) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Room gallery must contain between 1 and 20 photos",
+    );
+  }
+  await assertMediaTarget({
+    propertyId: params.propertyId,
+    usageType: "ROOM_TYPE_GALLERY",
+    targetId: params.roomTypeId,
+  });
+  const assets = await Promise.all(
+    assetIds.map((assetId) => getOwnedMedia(assetId, params.propertyId)),
+  );
+  if (
+    assets.some(
+      (asset) =>
+        asset.status !== "PUBLISHED" ||
+        asset.scanStatus !== "CLEAN" ||
+        asset.purgedAt ||
+        !asset.authenticPropertyMedia,
+    )
+  ) {
+    throw new AppError(
+      "CONFLICT",
+      "Only published, verified, authentic property photos can be used in a room gallery",
+    );
+  }
+
+  return getDatabase().transaction(async (tx) => {
+    await tx
+      .delete(mediaUsages)
+      .where(
+        and(
+          eq(mediaUsages.targetId, params.roomTypeId),
+          inArray(mediaUsages.usageType, [
+            "ROOM_TYPE_HERO",
+            "ROOM_TYPE_GALLERY",
+          ]),
+        ),
+      );
+    await tx.insert(mediaUsages).values(
+      assetIds.map((assetId, index) => ({
+        mediaAssetId: assetId,
+        usageType: index === 0 ? "ROOM_TYPE_HERO" : "ROOM_TYPE_GALLERY",
+        targetId: params.roomTypeId,
+        sortOrder: index,
+        createdByUserId: params.session.user.id,
+        updatedByUserId: params.session.user.id,
+      })),
+    );
+    await recordAuditEvent(
+      {
+        propertyId: params.propertyId,
+        actorUserId: params.session.user.id,
+        actorType: "user",
+        action: "cms.media.room_gallery.set",
+        targetType: "room_type",
+        targetId: params.roomTypeId,
+        after: { assetIds },
+        result: "SUCCESS",
+      },
+      tx,
+    );
+    return {
+      roomTypeId: params.roomTypeId,
+      assetIds,
+      heroAssetId: assetIds[0],
     };
   });
 }

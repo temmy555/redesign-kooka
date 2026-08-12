@@ -48,6 +48,16 @@ function errorMessage(value: unknown) {
   return "Titik absensi belum dapat disimpan.";
 }
 
+function generatedLocationCode(name: string) {
+  const prefix = name
+    .normalize("NFKD")
+    .replace(/[^a-zA-Z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .toUpperCase()
+    .slice(0, 20);
+  return `${prefix || "ATTENDANCE"}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+}
+
 async function mutate(body: JsonRecord) {
   const response = await fetch("/api/staff/admin/attendance-locations", {
     method: "POST",
@@ -174,11 +184,15 @@ export default function AttendanceLocationAdmin({
     event.preventDefault();
     setSaving(true);
     try {
+      const resolvedCode = code.trim() || generatedLocationCode(name);
+      const auditReason =
+        reason.trim() ||
+        `${editingId ? "Titik absensi diperbarui" : "Titik absensi dibuat"} oleh Owner`;
       await mutate({
         action: editingId ? "UPDATE_LOCATION" : "CREATE_LOCATION",
         ...(editingId ? { locationId: editingId } : {}),
         input: {
-          code,
+          code: resolvedCode,
           name,
           latitude: Number(latitude),
           longitude: Number(longitude),
@@ -186,7 +200,7 @@ export default function AttendanceLocationAdmin({
           maximumAccuracyMeters: Number(maximumAccuracy),
           effectiveFrom: effectiveFrom(startsOn),
           effectiveTo: hasEndDate ? effectiveTo(endsOn) : null,
-          reason,
+          reason: auditReason,
         },
       });
       setNotice({
@@ -267,12 +281,11 @@ export default function AttendanceLocationAdmin({
         <form className={styles.staffForm} onSubmit={save}>
           <div className={styles.formGrid}>
             <label>
-              Kode titik
+              Kode titik (opsional)
               <input
                 maxLength={64}
                 onChange={(event) => setCode(event.target.value)}
-                placeholder="KOOKA-MAIN"
-                required
+                placeholder="Dibuat otomatis bila dikosongkan"
                 value={code}
               />
             </label>
@@ -355,56 +368,76 @@ export default function AttendanceLocationAdmin({
               GPS aktual di properti.
             </p>
           ) : null}
-          <div className={styles.formGrid}>
-            <label>
-              Mulai berlaku
-              <DateField
-                ariaLabel="Tanggal mulai titik absensi"
-                onChange={setStartsOn}
-                value={startsOn}
-              />
-            </label>
-            <div className={styles.fieldGroup}>
-              <label className={styles.checkboxLabel}>
+          <div className={styles.attendancePeriodPanel}>
+            <div className={styles.attendancePeriodHeader}>
+              <div>
+                <strong>Periode berlaku</strong>
+                <small>
+                  Tentukan kapan titik ini mulai dan berhenti digunakan.
+                </small>
+              </div>
+              <label className={styles.attendanceEndToggle}>
                 <input
                   checked={hasEndDate}
                   onChange={(event) => setHasEndDate(event.target.checked)}
                   type="checkbox"
                 />
-                Tetapkan tanggal berakhir
+                <span
+                  aria-hidden="true"
+                  className={styles.attendanceToggleTrack}
+                >
+                  <span />
+                </span>
+                <span>Tetapkan tanggal berakhir</span>
               </label>
-              {hasEndDate ? (
+            </div>
+            <div className={styles.attendancePeriodGrid}>
+              <div className={styles.attendancePeriodField}>
+                <span>Mulai berlaku</span>
                 <DateField
-                  ariaLabel="Tanggal berakhir titik absensi"
-                  min={startsOn}
-                  onChange={setEndsOn}
-                  value={endsOn}
+                  ariaLabel="Tanggal mulai titik absensi"
+                  onChange={setStartsOn}
+                  value={startsOn}
                 />
-              ) : (
-                <p className={styles.formHint}>Berlaku tanpa batas akhir.</p>
-              )}
+              </div>
+              <div className={styles.attendancePeriodField}>
+                <span>Berakhir pada</span>
+                {hasEndDate ? (
+                  <DateField
+                    ariaLabel="Tanggal berakhir titik absensi"
+                    min={startsOn}
+                    onChange={setEndsOn}
+                    value={endsOn}
+                  />
+                ) : (
+                  <div className={styles.attendanceNoEndDate}>
+                    <strong>Tanpa batas waktu</strong>
+                    <small>Titik tetap aktif hingga dinonaktifkan.</small>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-          <label>
-            Alasan pembuatan / perubahan
+          <label className={styles.attendanceReasonField}>
+            Catatan perubahan (opsional)
             <textarea
-              minLength={3}
               onChange={(event) => setReason(event.target.value)}
               placeholder="Contoh: menetapkan titik absensi utama"
-              required
               value={reason}
             />
           </label>
-          <button
-            className={styles.primaryButton}
-            disabled={!canManage || saving}
-          >
-            {saving
-              ? "Menyimpan…"
-              : editingId
-                ? "Simpan perubahan"
-                : "Tambahkan titik absensi"}
-          </button>
+          <div className={styles.attendanceFormActions}>
+            <button
+              className={`${styles.primaryButton} ${styles.attendanceSubmitButton}`}
+              disabled={!canManage || saving}
+            >
+              {saving
+                ? "Menyimpan…"
+                : editingId
+                  ? "Simpan perubahan"
+                  : "Tambahkan titik absensi"}
+            </button>
+          </div>
         </form>
       </section>
 

@@ -7,17 +7,26 @@ import LandingPage, {
   landingRoomMeta,
   landingStrings,
   landingValue,
+  RoomDetailModal,
 } from "../../app/LandingPage";
 import BookingResults, {
   BookingResultContent,
   loadAvailability,
+  roomSelections,
   type AvailabilityResponse,
   type SearchInput,
 } from "../../app/booking/BookingResults";
 import BookingPage, { nonNegativeInteger } from "../../app/booking/page";
+import {
+  formatPaymentCountdown,
+  paymentTimeRemaining,
+} from "../../app/booking/PaymentCountdown";
 import BookingLookupPage from "../../app/booking/lookup/page";
 import ContentPreviewPage from "../../app/preview/page";
-import { nextPublicDate } from "../../app/PublicFormControls";
+import {
+  nextPublicDate,
+  publicDateFromToday,
+} from "../../app/PublicFormControls";
 import { approvedBaselineLanding } from "../../src/modules/content/default-content";
 
 const U1 = "11111111-1111-4111-a111-111111111111";
@@ -100,6 +109,21 @@ describe("Batch 4 public pages", () => {
       "$6.10",
     );
     expect(formatMenuPrice(100_000, "AUD", {}, "en")).toBeNull();
+  });
+
+  it("defaults public stay dates from today in the Jakarta timezone", () => {
+    const lateUtc = new Date("2026-08-11T17:30:00.000Z");
+    expect(publicDateFromToday(0, lateUtc)).toBe("2026-08-12");
+    expect(publicDateFromToday(1, lateUtc)).toBe("2026-08-13");
+  });
+
+  it("formats the configured reservation payment deadline as a countdown", () => {
+    const now = new Date("2026-08-12T08:00:00.000Z").getTime();
+    const deadline = "2026-08-12T09:30:05.000Z";
+    expect(paymentTimeRemaining(deadline, now)).toBe(5_405_000);
+    expect(formatPaymentCountdown(5_405_000)).toBe("01:30:05");
+    expect(paymentTimeRemaining(deadline, now + 6_000_000)).toBe(0);
+    expect(formatPaymentCountdown(0)).toBe("00:00:00");
   });
 
   it("renders active public menu data without placeholder copy", () => {
@@ -280,6 +304,29 @@ describe("Batch 4 public pages", () => {
     expect(html).toContain("maks. 3 tamu");
     expect(html).toContain("extra bed hingga 1");
     expect(html).toContain("Wi-Fi");
+    expect(html).toContain("Lihat detail");
+    expect(html).not.toContain('class="image-index"');
+
+    const detail = renderToStaticMarkup(
+      <RoomDetailModal
+        fallbackImage="/images/room-fallback.jpg"
+        locale="id"
+        onCheckAvailability={() => undefined}
+        onClose={() => undefined}
+        room={{
+          ...data.rooms[0]!,
+          amenities: [
+            ...data.rooms[0]!.amenities,
+            { code: "NO_SMOKING", name: "Dilarang merokok" },
+          ],
+        }}
+      />,
+    );
+    expect(detail).toContain("Detail kamar");
+    expect(detail).toContain("Maks. 3 tamu");
+    expect(detail).toContain("Queen bed");
+    expect(detail).toContain("Dilarang merokok");
+    expect(detail).toContain("Cek ketersediaan");
   });
 
   it("renders booking search loading state and normalized query", async () => {
@@ -299,8 +346,13 @@ describe("Batch 4 public pages", () => {
       }),
     });
     const html = renderToStaticMarkup(page);
-    expect(html).toContain("Find your pause");
-    expect(html).toContain("Change search");
+    expect(html).toContain("Choose your room");
+    expect(html).toContain("Update results");
+    expect(html).toContain('name="checkInDate"');
+    expect(html).toContain('name="checkoutDate"');
+    expect(html).toContain('name="adults"');
+    expect(html).toContain('name="rooms"');
+    expect(html).toContain("Guest details");
 
     expect(nonNegativeInteger(["3", "4"], 1)).toBe(3);
     expect(nonNegativeInteger("0", 2)).toBe(0);
@@ -310,7 +362,7 @@ describe("Batch 4 public pages", () => {
 
     const defaults = await BookingPage({ searchParams: Promise.resolve({}) });
     const defaultHtml = renderToStaticMarkup(defaults);
-    expect(defaultHtml).toContain("Temukan jeda Anda");
+    expect(defaultHtml).toContain("Pilih kamar Anda");
     expect(defaultHtml).toContain("IDR");
 
     const aud = await BookingPage({
@@ -416,12 +468,91 @@ describe("Batch 4 public pages", () => {
     );
     expect(id).toContain("2 kamar tersedia");
     expect(id).toContain("Extra bed hingga");
-    expect(id).toContain("Sedang ditahan sementara");
+    expect(id).toContain("Tidak tersedia pada tanggal ini");
     expect(en).toContain("2 rooms available");
-    expect(en).toContain("Temporarily held");
-    expect(en).toContain("Select room");
+    expect(en).toContain("Unavailable for selected dates");
+    expect(en).toContain("Add room");
+    expect(en).toContain("2 nights");
+    expect(en).toContain(
+      "Taxes and service charges, if applicable, are shown in the summary before booking.",
+    );
+    expect(id).toContain(
+      "Pajak dan biaya layanan, jika berlaku, ditampilkan di ringkasan sebelum booking.",
+    );
     expect(empty).toContain("Search failed");
     expect(empty).toContain("Belum ada tipe kamar aktif");
+  });
+
+  it("allows a multi-room search to combine different room types", () => {
+    const queen: AvailabilityResponse["roomTypes"][number] = {
+      id: U1,
+      code: "QUEEN",
+      nameId: "Queen Room",
+      nameEn: "Queen Room",
+      maximumAdults: 2,
+      maximumChildren: 0,
+      maximumTotalGuests: 2,
+      extraBedAllowed: false,
+      maximumExtraBeds: 0,
+      extraBedCapacityIncrement: 0,
+      availableRooms: 1,
+      available: false,
+      offer: {
+        ratePlanCode: "QUEEN-ONLINE",
+        ratePlanNameId: "Online",
+        ratePlanNameEn: "Online",
+        nightlyFromIdr: 300000,
+        estimatedStayIdr: 600000,
+      },
+    };
+    const garden = {
+      ...queen,
+      id: "22222222-2222-4222-a222-222222222222",
+      code: "QUEEN-GARDEN",
+      nameId: "Queen Garden",
+      nameEn: "Queen Garden",
+      offer: { ...queen.offer!, ratePlanCode: "GARDEN-ONLINE" },
+    };
+    const multiSearch = {
+      ...search,
+      rooms: 2,
+      adults: 4,
+      locale: "en" as const,
+    };
+    const result: AvailabilityResponse = {
+      checkInDate: search.checkInDate,
+      checkoutDate: search.checkoutDate,
+      nights: 2,
+      requestedRooms: 2,
+      roomTypes: [queen, garden],
+    };
+    const html = renderToStaticMarkup(
+      <BookingResultContent
+        search={multiSearch}
+        result={result}
+        loading={false}
+        error=""
+        selectedRoomCounts={{ [queen.id]: 1 }}
+      />,
+    );
+    expect(html).toContain("1 of 2 rooms selected");
+    expect(html).toContain("1 room available");
+    expect(html).toContain("Add room");
+    expect(html).not.toContain("Only 1 rooms available");
+
+    const selections = roomSelections(multiSearch, [queen, garden]);
+    expect(selections).toEqual([
+      expect.objectContaining({
+        roomTypeId: queen.id,
+        ratePlanCode: "QUEEN-ONLINE",
+        adults: 2,
+      }),
+      expect.objectContaining({
+        roomTypeId: garden.id,
+        ratePlanCode: "GARDEN-ONLINE",
+        adults: 2,
+      }),
+    ]);
   });
 
   it("loads availability and preserves API errors", async () => {

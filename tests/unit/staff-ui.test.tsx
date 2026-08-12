@@ -10,7 +10,9 @@ import DashboardView, {
   formatIdr,
   type DashboardData,
 } from "../../app/staff/_components/DashboardView";
-import AdminWorkspace from "../../app/staff/_components/AdminWorkspace";
+import AdminWorkspace, {
+  effectiveVersion,
+} from "../../app/staff/_components/AdminWorkspace";
 import {
   attendanceCameraLabel,
   shouldUseAttendanceCamera,
@@ -26,6 +28,7 @@ import {
 import FrontOfficeDesk, {
   assignableRooms,
   bookingPaymentDescription,
+  bookingStatusLabel,
   folioBookingDescription,
   human,
   isActiveReservationRoom,
@@ -35,6 +38,9 @@ import RoomMonitor, {
   filterRooms,
   type RoomBoardData,
 } from "../../app/staff/_components/RoomMonitor";
+import StaffNotice, {
+  canDismissStaffNoticePassively,
+} from "../../app/staff/_components/StaffNotice";
 import { allowedNavigation } from "../../app/staff/_components/StaffShell";
 import { safeStaffDestination } from "../../app/staff/login/login-utils";
 
@@ -115,6 +121,23 @@ const roomBoard: RoomBoardData = {
 };
 
 describe("Step 22A staff UI", () => {
+  it("keeps success confirmation open until the OK button is used", () => {
+    const notice = {
+      tone: "success" as const,
+      message: "Pengaturan berhasil disimpan.",
+    };
+    const html = renderToStaticMarkup(
+      <StaffNotice notice={notice} onDismiss={vi.fn()} />,
+    );
+
+    expect(canDismissStaffNoticePassively(notice)).toBe(false);
+    expect(
+      canDismissStaffNoticePassively({ tone: "error", message: "Gagal" }),
+    ).toBe(true);
+    expect(html).toContain("Pengaturan berhasil disimpan.");
+    expect(html).toContain(">OK</button>");
+  });
+
   it("runs the attendance camera only while the selfie step is active", () => {
     expect(shouldUseAttendanceCamera("clock", "not_started", false)).toBe(true);
     expect(shouldUseAttendanceCamera("clock", "working", false)).toBe(true);
@@ -169,8 +192,28 @@ describe("Step 22A staff UI", () => {
     expect(frontOffice).toContain("Booking manual / multi-room");
     expect(frontOffice).not.toContain("JSON");
     expect(admin).toContain("Pengaturan");
-    expect(admin).toContain("Profil properti");
+    expect(admin).toContain("Setup awal");
+    expect(admin).toContain("Properti dan waktu operasional");
+    expect(admin).toContain("Harga dan pembayaran");
+    expect(admin).toContain("Profil invoice dan kuitansi belum aktif");
     expect(admin).not.toContain("JSON");
+  });
+
+  it("uses the server-effective flag for document setup readiness", () => {
+    expect(
+      effectiveVersion({
+        lifecycleStatus: "ACTIVE",
+        effectiveFrom: "invalid-client-date",
+        effectiveNow: true,
+      }),
+    ).toBe(true);
+    expect(
+      effectiveVersion({
+        lifecycleStatus: "ACTIVE",
+        effectiveFrom: "2026-01-01T00:00:00.000Z",
+        effectiveNow: false,
+      }),
+    ).toBe(false);
   });
 
   it("renders KOOKA form controls without native date/select chrome", () => {
@@ -197,6 +240,8 @@ describe("Step 22A staff UI", () => {
     expect(human(null)).toBe("belum tersedia");
     expect(human(undefined, "belum dialokasikan")).toBe("belum dialokasikan");
     expect(human("DUE_IN")).toBe("due in");
+    expect(bookingStatusLabel("ON_HOLD")).toBe("Menunggu pembayaran");
+    expect(bookingStatusLabel("EXPIRED")).toBe("Kedaluwarsa");
   });
 
   it("removes a checked-out room line from the active multi-room desk", () => {

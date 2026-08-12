@@ -1,9 +1,11 @@
 "use client";
 
 import Image from "next/image";
+import kookaFoodImage from "../public/images/agoda-kooka/dining-food-beverages.jpg";
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -18,12 +20,11 @@ import type {
 } from "../src/modules/content/contracts";
 import {
   nextPublicDate,
+  publicDateFromToday,
   PublicDateField,
   PublicSelect,
 } from "./PublicFormControls";
 import KookaLogo from "./KookaLogo";
-
-const kookaFoodImage = "/images/agoda-kooka/dining-food-beverages.jpg";
 
 const WHATSAPP_NUMBER = "6283831455142";
 const WHATSAPP_MESSAGE: Record<PublicLocale, string> = {
@@ -36,18 +37,17 @@ function whatsappHref(locale: PublicLocale) {
 }
 
 const roomImageFallbacks = [
-  "/images/agoda-kooka/room-mezzanine-guestroom.jpg",
-  "/images/agoda-kooka/room-two-bedroom-villa-bed.jpg",
-  "/images/agoda-kooka/room-generic-01.jpg",
-  "/images/agoda-kooka/room-generic-02.jpg",
-  "/images/agoda-kooka/room-generic-03.jpg",
+  "/images/kooka-assets/ark-05044.jpg",
+  "/images/kooka-assets/ark-05050.jpg",
+  "/images/kooka-assets/ark-05060.jpg",
+  "/images/kooka-assets/ark-05070.jpg",
+  "/images/kooka-assets/ark-05080.jpg",
 ];
 
 const authenticImageReplacements: Record<string, string> = {
-  "/images/kooka-hero.jpeg": "/images/agoda-kooka/property-entrance.jpg",
-  "/images/tropical-courtyard.jpg": "/images/agoda-kooka/facility-garden.jpg",
-  "/images/gallery-room.jpg":
-    "/images/agoda-kooka/room-mezzanine-guestroom.jpg",
+  "/images/kooka-hero.jpeg": "/images/kooka-assets/ark-05080.jpg",
+  "/images/tropical-courtyard.jpg": "/images/kooka-assets/ark-05070.jpg",
+  "/images/gallery-room.jpg": "/images/kooka-assets/ark-05100.jpg",
 };
 
 function authenticImage(value: string) {
@@ -164,12 +164,6 @@ function EditorialHeading({
   );
 }
 
-function tomorrow(offset: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + offset);
-  return date.toISOString().slice(0, 10);
-}
-
 export function landingRoomMeta(room: LandingRoomType, locale: PublicLocale) {
   const guests =
     locale === "id"
@@ -215,8 +209,8 @@ function BookingSearch({
   locale: PublicLocale;
   currency: PublicDisplayCurrency;
 }) {
-  const [checkIn, setCheckIn] = useState(() => tomorrow(1));
-  const [checkout, setCheckout] = useState(() => tomorrow(2));
+  const [checkIn, setCheckIn] = useState(() => publicDateFromToday(0));
+  const [checkout, setCheckout] = useState(() => publicDateFromToday(1));
   const [adults, setAdults] = useState("2");
   const [rooms, setRooms] = useState("1");
 
@@ -232,7 +226,7 @@ function BookingSearch({
           ariaLabel="Check-in"
           locale={locale}
           name="checkInDate"
-          min={tomorrow(0)}
+          min={publicDateFromToday(0)}
           value={checkIn}
           onChange={(next) => {
             setCheckIn(next);
@@ -286,6 +280,198 @@ function BookingSearch({
   );
 }
 
+export function RoomDetailModal({
+  room,
+  fallbackImage,
+  locale,
+  onClose,
+  onCheckAvailability,
+}: {
+  room: LandingRoomType;
+  fallbackImage: string;
+  locale: PublicLocale;
+  onClose: () => void;
+  onCheckAvailability: () => void;
+}) {
+  const [activeImage, setActiveImage] = useState(0);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const images = room.media.length
+    ? room.media
+    : [
+        {
+          id: `fallback-${room.id}`,
+          url: fallbackImage,
+          alt: `${room.name} · KOOKA Residence Surabaya`,
+          caption: null,
+          sortOrder: 0,
+        },
+      ];
+  const currentImage = images[activeImage] ?? images[0]!;
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButton.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [onClose, room.id]);
+
+  const details = [
+    {
+      label: locale === "id" ? "Kapasitas" : "Capacity",
+      value:
+        locale === "id"
+          ? `Maks. ${room.maximumTotalGuests} tamu`
+          : `Max. ${room.maximumTotalGuests} guests`,
+    },
+    {
+      label: locale === "id" ? "Tamu dewasa" : "Adults",
+      value:
+        locale === "id"
+          ? `Maks. ${room.maximumAdults} dewasa`
+          : `Max. ${room.maximumAdults} adults`,
+    },
+    {
+      label: locale === "id" ? "Tempat tidur" : "Bed",
+      value:
+        room.bedConfiguration ||
+        (locale === "id"
+          ? "Konfirmasi ke Front Office"
+          : "Confirm with Front Office"),
+    },
+    {
+      label: "Extra bed",
+      value: room.extraBedAllowed
+        ? locale === "id"
+          ? `Tersedia hingga ${room.maximumExtraBeds}`
+          : `Available up to ${room.maximumExtraBeds}`
+        : locale === "id"
+          ? "Tidak tersedia"
+          : "Not available",
+    },
+  ];
+
+  return (
+    <div className="room-modal-shell">
+      <button
+        aria-label={
+          locale === "id" ? "Tutup detail kamar" : "Close room details"
+        }
+        className="room-modal-backdrop"
+        onClick={onClose}
+        type="button"
+      />
+      <section
+        aria-labelledby={`room-detail-title-${room.id}`}
+        aria-modal="true"
+        className="room-modal"
+        role="dialog"
+      >
+        <button
+          aria-label={locale === "id" ? "Tutup" : "Close"}
+          className="room-modal-close"
+          onClick={onClose}
+          ref={closeButton}
+          type="button"
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+        <div className="room-modal-gallery">
+          <div className="room-modal-hero">
+            <Image
+              alt={currentImage.alt}
+              fill
+              priority
+              sizes="(max-width: 820px) 100vw, 58vw"
+              src={currentImage.url}
+            />
+            {images.length > 1 ? (
+              <span className="room-gallery-count">
+                {activeImage + 1} / {images.length}
+              </span>
+            ) : null}
+          </div>
+          {images.length > 1 ? (
+            <div
+              aria-label={locale === "id" ? "Galeri kamar" : "Room gallery"}
+              className="room-modal-thumbnails"
+            >
+              {images.map((image, index) => (
+                <button
+                  aria-label={
+                    locale === "id"
+                      ? `Lihat foto ${index + 1}`
+                      : `View photo ${index + 1}`
+                  }
+                  aria-pressed={activeImage === index}
+                  className={activeImage === index ? "is-active" : undefined}
+                  key={image.id}
+                  onClick={() => setActiveImage(index)}
+                  type="button"
+                >
+                  <Image alt="" fill sizes="92px" src={image.url} />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="room-modal-content">
+          <p className="eyebrow">
+            {locale === "id" ? "Detail kamar" : "Room details"}
+          </p>
+          <h2 id={`room-detail-title-${room.id}`}>{room.name}</h2>
+          <p className="room-modal-description">
+            {room.description ||
+              (locale === "id"
+                ? "Ruang personal yang tenang untuk beristirahat nyaman selama berada di Surabaya."
+                : "A calm, personal space for a comfortable and restful stay in Surabaya.")}
+          </p>
+          <dl className="room-detail-facts">
+            {details.map((detail) => (
+              <div key={detail.label}>
+                <dt>{detail.label}</dt>
+                <dd>{detail.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="room-amenities">
+            <h3>{locale === "id" ? "Fasilitas kamar" : "Room amenities"}</h3>
+            {room.amenities.length ? (
+              <ul>
+                {room.amenities.map((amenity) => (
+                  <li key={amenity.code}>
+                    <span aria-hidden="true">✓</span>
+                    {amenity.name}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>
+                {locale === "id"
+                  ? "Detail fasilitas dapat dikonfirmasi kepada Front Office."
+                  : "Amenity details can be confirmed with Front Office."}
+              </p>
+            )}
+          </div>
+          <button
+            className="button room-modal-cta"
+            onClick={onCheckAvailability}
+            type="button"
+          >
+            {locale === "id" ? "Cek ketersediaan" : "Check availability"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function LandingPage({
   initialData,
 }: {
@@ -295,6 +481,12 @@ export default function LandingPage({
   const [locale, setLocale] = useState<PublicLocale>(initialData.locale);
   const [currency, setCurrency] = useState<PublicDisplayCurrency>("IDR");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState<LandingRoomType | null>(
+    null,
+  );
+  const heroVideoRef = useRef<HTMLVideoElement>(null);
+  const [heroVideoMuted, setHeroVideoMuted] = useState(true);
+  const [heroVideoPlaying, setHeroVideoPlaying] = useState(true);
 
   useEffect(() => {
     const isLocaleExplicit = window.localStorage.getItem(
@@ -362,26 +554,35 @@ export default function LandingPage({
   );
   const heroImage = authenticImage(
     hero?.media?.[0]?.url ||
-      landingValue(
-        hero,
-        "imageUrl",
-        "/images/agoda-kooka/property-entrance.jpg",
-      ),
+      landingValue(hero, "imageUrl", "/images/kooka-assets/ark-05080.jpg"),
   );
+  const heroVideo = landingValue(hero, "heroVideoUrl");
   const heroAlt =
     hero?.media?.[0]?.alt ||
     landingValue(hero, "imageAlt", "KOOKA Residence Surabaya");
+  const heroImageLabel = landingValue(hero, "imageLabel", "KOOKA Residence")
+    .split("·")[0]
+    .trim();
   const experienceImages = landingStrings(experience, "images").map(
     authenticImage,
   );
   const galleryImages = landingStrings(gallery, "images").map(authenticImage);
+  const locationAddress = publicAddress(
+    landingValue(
+      location,
+      "address",
+      data.property.address ?? "Surabaya, Indonesia",
+    ),
+  );
+  const locationMapUrl = `https://www.google.com/maps?q=${encodeURIComponent(
+    `KOOKA Residence Surabaya, ${locationAddress}`,
+  )}&output=embed`;
 
   function changeCurrency(next: PublicDisplayCurrency) {
     setCurrency(next);
   }
 
-  function goToBookingSearch(event: ReactMouseEvent<HTMLAnchorElement>) {
-    event.preventDefault();
+  function focusBookingSearch() {
     setMenuOpen(false);
     const form = document.getElementById("availability");
     if (!form) return;
@@ -392,6 +593,31 @@ export default function LandingPage({
         .querySelector<HTMLButtonElement>(".public-date-trigger")
         ?.focus({ preventScroll: true });
     });
+  }
+
+  function goToBookingSearch(event: ReactMouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    focusBookingSearch();
+  }
+
+  function toggleHeroVideoSound() {
+    const video = heroVideoRef.current;
+    if (!video) return;
+
+    video.muted = !video.muted;
+    setHeroVideoMuted(video.muted);
+  }
+
+  function toggleHeroVideoPlayback() {
+    const video = heroVideoRef.current;
+    if (!video) return;
+
+    if (video.paused) {
+      void video.play().catch(() => setHeroVideoPlaying(false));
+      return;
+    }
+
+    video.pause();
   }
 
   return (
@@ -485,16 +711,116 @@ export default function LandingPage({
 
       <section className="hero">
         <div className="hero-visual">
-          <Image
-            src={heroImage}
-            alt={heroAlt}
-            fill
-            priority
-            sizes="(max-width: 900px) 100vw, 50vw"
-          />
+          {heroVideo ? (
+            <video
+              ref={heroVideoRef}
+              className="hero-video"
+              autoPlay
+              muted
+              loop
+              playsInline
+              poster={heroImage}
+              onPause={() => setHeroVideoPlaying(false)}
+              onPlay={() => setHeroVideoPlaying(true)}
+              onVolumeChange={(event) =>
+                setHeroVideoMuted(event.currentTarget.muted)
+              }
+            >
+              <source src={heroVideo} type="video/mp4" />
+              <source src={heroVideo} type="video/quicktime" />
+            </video>
+          ) : (
+            <Image
+              src={heroImage}
+              alt={heroAlt}
+              fill
+              priority
+              sizes="(max-width: 900px) 100vw, 50vw"
+            />
+          )}
+          {heroVideo ? (
+            <div
+              className="hero-video-controls"
+              role="group"
+              aria-label={
+                locale === "id" ? "Kontrol video hero" : "Hero video controls"
+              }
+            >
+              <button
+                type="button"
+                onClick={toggleHeroVideoPlayback}
+                aria-label={
+                  heroVideoPlaying
+                    ? locale === "id"
+                      ? "Jeda video"
+                      : "Pause video"
+                    : locale === "id"
+                      ? "Putar video"
+                      : "Play video"
+                }
+                title={
+                  heroVideoPlaying
+                    ? locale === "id"
+                      ? "Jeda video"
+                      : "Pause video"
+                    : locale === "id"
+                      ? "Putar video"
+                      : "Play video"
+                }
+              >
+                {heroVideoPlaying ? (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M8 6v12M16 6v12" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m9 6 9 6-9 6Z" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={toggleHeroVideoSound}
+                aria-label={
+                  heroVideoMuted
+                    ? locale === "id"
+                      ? "Aktifkan suara"
+                      : "Turn sound on"
+                    : locale === "id"
+                      ? "Matikan suara"
+                      : "Mute video"
+                }
+                title={
+                  heroVideoMuted
+                    ? locale === "id"
+                      ? "Aktifkan suara"
+                      : "Turn sound on"
+                    : locale === "id"
+                      ? "Matikan suara"
+                      : "Mute video"
+                }
+              >
+                {heroVideoMuted ? (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M11 7 7.5 10H4v4h3.5l3.5 3Z" />
+                    <path d="m16 9 5 5M21 9l-5 5" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M11 7 7.5 10H4v4h3.5l3.5 3Z" />
+                    <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          ) : null}
           <div className="hero-photo-label">
-            <span>{landingValue(hero, "imageLabel", "Courtyard")}</span>
-            <strong>Surabaya, Indonesia</strong>
+            <span>{heroImageLabel || "KOOKA Residence"}</span>
+            <strong>
+              {locale === "id"
+                ? "Tempat singgah tenang di Surabaya"
+                : "A quiet stay in Surabaya"}
+            </strong>
           </div>
         </div>
         <div className="hero-copy">
@@ -511,9 +837,6 @@ export default function LandingPage({
             <a className="text-link" href="#rooms">
               {locale === "id" ? "Jelajahi kamar" : "Explore rooms"} <b>↘</b>
             </a>
-            <span>
-              {guestFacingText(landingValue(hero, "bookingNote"), locale)}
-            </span>
           </div>
         </div>
         <BookingSearch locale={locale} currency={currency} />
@@ -545,7 +868,16 @@ export default function LandingPage({
           <div className="room-grid">
             {publicRooms.map((room, index) => (
               <article className="room-card" key={room.id}>
-                <div className="room-image">
+                <button
+                  aria-label={
+                    locale === "id"
+                      ? `Lihat detail ${room.name}`
+                      : `View details for ${room.name}`
+                  }
+                  className="room-image"
+                  onClick={() => setSelectedRoom(room)}
+                  type="button"
+                >
                   <Image
                     src={
                       room.media[0]?.url ??
@@ -558,14 +890,11 @@ export default function LandingPage({
                     fill
                     sizes="(max-width: 720px) 100vw, (max-width: 1100px) 50vw, 33vw"
                   />
-                  <span className="image-index">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
                   <span className="image-note">{room.name}</span>
                   <span className="room-arrow" aria-hidden="true">
                     ↗
                   </span>
-                </div>
+                </button>
                 <div className="room-body">
                   <p className="room-meta">{landingRoomMeta(room, locale)}</p>
                   <h3>{room.name}</h3>
@@ -594,9 +923,13 @@ export default function LandingPage({
                               : "No extra bed")}
                       </small>
                     </span>
-                    <a href="#availability" onClick={goToBookingSearch}>
-                      {locale === "id" ? "Lihat kamar" : "View room"}
-                    </a>
+                    <button
+                      className="room-detail-link"
+                      onClick={() => setSelectedRoom(room)}
+                      type="button"
+                    >
+                      {locale === "id" ? "Lihat detail" : "View details"}
+                    </button>
                   </div>
                 </div>
               </article>
@@ -619,6 +952,26 @@ export default function LandingPage({
           </div>
         )}
       </section>
+
+      {selectedRoom ? (
+        <RoomDetailModal
+          fallbackImage={
+            roomImageFallbacks[
+              Math.max(
+                0,
+                publicRooms.findIndex((room) => room.id === selectedRoom.id),
+              ) % roomImageFallbacks.length
+            ]!
+          }
+          locale={locale}
+          onCheckAvailability={() => {
+            setSelectedRoom(null);
+            window.requestAnimationFrame(focusBookingSearch);
+          }}
+          onClose={() => setSelectedRoom(null)}
+          room={selectedRoom}
+        />
+      ) : null}
 
       <section className="experience" id="experience">
         <div className="experience-copy">
@@ -646,7 +999,7 @@ export default function LandingPage({
                 src={
                   experience?.media?.[index]?.url ||
                   experienceImages[index] ||
-                  "/images/agoda-kooka/facility-garden.jpg"
+                  "/images/kooka-assets/ark-05070.jpg"
                 }
                 alt={
                   experience?.media?.[index]?.alt ||
@@ -678,9 +1031,11 @@ export default function LandingPage({
               fill
               sizes="(max-width: 900px) 100vw, 50vw"
             />
-            <span className="plate plate-one" aria-hidden="true" />
-            <span className="plate plate-two" aria-hidden="true" />
-            <p>KOOKA kitchen · Surabaya</p>
+            <p>
+              {locale === "id"
+                ? "Makanan & minuman · KOOKA Residence"
+                : "Food & drinks · KOOKA Residence"}
+            </p>
           </div>
           <div className="menu-copy">
             <p className="eyebrow">
@@ -781,7 +1136,7 @@ export default function LandingPage({
                 src={
                   gallery?.media?.[index]?.url ||
                   galleryImages[index] ||
-                  "/images/agoda-kooka/room-mezzanine-guestroom.jpg"
+                  "/images/kooka-assets/ark-05080.jpg"
                 }
                 alt={
                   gallery?.media?.[index]?.alt || "A moment at KOOKA Residence"
@@ -804,20 +1159,18 @@ export default function LandingPage({
       </section>
 
       <section className="location" id="location">
-        <div className="map-art" aria-label="KOOKA Residence location">
-          <span className="road r1" />
-          <span className="road r2" />
-          <span className="road r3" />
-          <span className="map-pin">K</span>
-          <small>
-            {publicAddress(
-              landingValue(
-                location,
-                "address",
-                data.property.address ?? "Surabaya, Indonesia",
-              ),
-            )}
-          </small>
+        <div className="location-map">
+          <iframe
+            title="KOOKA Residence Surabaya on Google Maps"
+            src={locationMapUrl}
+            loading="lazy"
+            allowFullScreen
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+          <div className="location-address">
+            <span>KOOKA Residence</span>
+            <strong>{locationAddress}</strong>
+          </div>
         </div>
         <div className="location-copy">
           <p className="eyebrow light">{landingValue(location, "eyebrow")}</p>

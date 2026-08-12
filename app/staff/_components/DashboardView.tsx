@@ -275,7 +275,8 @@ export default function DashboardView({
           <span>Tagihan belum lunas</span>
           <strong>{formatIdr(data.summary.outstanding_idr)}</strong>
           <small>
-            Total sisa tagihan dari seluruh booking yang masih terbuka
+            Total sisa tagihan dari booking aktif atau selesai yang masih perlu
+            dilunasi
           </small>
           <Link
             className={styles.metricAction}

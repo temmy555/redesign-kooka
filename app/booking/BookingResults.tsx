@@ -9,6 +9,13 @@ import type {
   PublicLocale,
 } from "../../src/modules/content/contracts";
 import KookaLogo from "../KookaLogo";
+import {
+  nextPublicDate,
+  publicDateFromToday,
+  PublicDateField,
+  PublicSelect,
+} from "../PublicFormControls";
+import PaymentCountdown from "./PaymentCountdown";
 
 interface PublicOffer {
   ratePlanCode: string;
@@ -53,6 +60,85 @@ export interface SearchInput {
   currency: PublicDisplayCurrency;
 }
 
+export function BookingSearchForm({ search }: { search: SearchInput }) {
+  const [checkInDate, setCheckInDate] = useState(search.checkInDate);
+  const [checkoutDate, setCheckoutDate] = useState(search.checkoutDate);
+  const [adults, setAdults] = useState(String(search.adults));
+  const [rooms, setRooms] = useState(String(search.rooms));
+  const locale = search.locale;
+  const adultOptions = Array.from({ length: 6 }, (_, index) => {
+    const value = String(index + 1);
+    return { value, label: value };
+  });
+  const roomOptions = Array.from({ length: 4 }, (_, index) => {
+    const value = String(index + 1);
+    return { value, label: value };
+  });
+
+  return (
+    <form className="booking-search-panel" action="/booking" method="get">
+      <input name="locale" type="hidden" value={search.locale} />
+      <input name="currency" type="hidden" value={search.currency} />
+      <input name="children" type="hidden" value={search.children} />
+      <input name="infants" type="hidden" value={search.infants} />
+      <label className="booking-search-field">
+        <small>Check-in</small>
+        <PublicDateField
+          ariaLabel="Check-in"
+          locale={locale}
+          min={publicDateFromToday(0)}
+          name="checkInDate"
+          onChange={(next) => {
+            setCheckInDate(next);
+            if (checkoutDate <= next) setCheckoutDate(nextPublicDate(next));
+          }}
+          value={checkInDate}
+        />
+      </label>
+      <label className="booking-search-field">
+        <small>Check-out</small>
+        <PublicDateField
+          ariaLabel="Check-out"
+          locale={locale}
+          min={nextPublicDate(checkInDate)}
+          name="checkoutDate"
+          onChange={setCheckoutDate}
+          value={checkoutDate}
+        />
+      </label>
+      <label className="booking-search-field">
+        <small>{locale === "id" ? "Tamu" : "Guests"}</small>
+        <PublicSelect
+          ariaLabel={locale === "id" ? "Jumlah tamu" : "Number of guests"}
+          name="adults"
+          onChange={(next) => {
+            setAdults(next);
+            if (Number(rooms) > Number(next)) setRooms(next);
+          }}
+          options={adultOptions}
+          value={adults}
+        />
+      </label>
+      <label className="booking-search-field">
+        <small>{locale === "id" ? "Kamar" : "Rooms"}</small>
+        <PublicSelect
+          ariaLabel={locale === "id" ? "Jumlah kamar" : "Number of rooms"}
+          name="rooms"
+          onChange={(next) => {
+            setRooms(next);
+            if (Number(adults) < Number(next)) setAdults(next);
+          }}
+          options={roomOptions}
+          value={rooms}
+        />
+      </label>
+      <button className="booking-change-search" type="submit">
+        {locale === "id" ? "Perbarui hasil" : "Update results"} →
+      </button>
+    </form>
+  );
+}
+
 interface Policy {
   id: string;
   type: string;
@@ -66,6 +152,9 @@ interface Policy {
 
 interface QuoteResponse {
   quoteId: string;
+  netAmountIdr: number;
+  serviceChargeIdr: number;
+  taxIdr: number;
   totalIdr: number;
   displayCurrency: PublicDisplayCurrency;
   displayTotal: number;
@@ -100,6 +189,7 @@ interface ReservationResponse {
 
 interface RoomSelection {
   roomTypeId: string;
+  ratePlanCode: string;
   adults: number;
   children: number;
   infants: number;
@@ -107,10 +197,10 @@ interface RoomSelection {
 }
 
 const roomImages = [
-  "/images/agoda-kooka/room-mezzanine-guestroom.jpg",
-  "/images/agoda-kooka/room-two-bedroom-villa-bed.jpg",
-  "/images/agoda-kooka/room-generic-01.jpg",
-  "/images/agoda-kooka/room-generic-02.jpg",
+  "/images/kooka-assets/ark-05044.jpg",
+  "/images/kooka-assets/ark-05050.jpg",
+  "/images/kooka-assets/ark-05060.jpg",
+  "/images/kooka-assets/ark-05070.jpg",
 ];
 
 const AVAILABILITY_REFRESH_MS = 15_000;
@@ -175,7 +265,40 @@ function distribute(total: number, rooms: number, minimum = 0) {
   return values;
 }
 
-function roomSelections(search: SearchInput, room: AvailabilityRoom) {
+function requiredExtraBeds(
+  room: AvailabilityRoom,
+  adults: number,
+  children: number,
+) {
+  const capacityExcess = Math.max(
+    0,
+    adults - room.maximumAdults,
+    adults + children - room.maximumTotalGuests,
+  );
+  const increment = Math.max(1, room.extraBedCapacityIncrement);
+  return Math.ceil(capacityExcess / increment);
+}
+
+function roomCanHold(room: AvailabilityRoom, adults: number, children: number) {
+  const extraBedQuantity = requiredExtraBeds(room, adults, children);
+  return (
+    children <= room.maximumChildren &&
+    extraBedQuantity <= room.maximumExtraBeds &&
+    (extraBedQuantity === 0 || room.extraBedAllowed)
+  );
+}
+
+export function roomSelections(
+  search: SearchInput,
+  selectedRooms: AvailabilityRoom[],
+) {
+  if (selectedRooms.length !== search.rooms) {
+    throw new Error(
+      search.locale === "id"
+        ? `Pilih tepat ${search.rooms} kamar untuk melanjutkan.`
+        : `Select exactly ${search.rooms} rooms to continue.`,
+    );
+  }
   if (search.adults < search.rooms) {
     throw new Error(
       search.locale === "id"
@@ -183,33 +306,65 @@ function roomSelections(search: SearchInput, room: AvailabilityRoom) {
         : "Each room requires at least one adult guest.",
     );
   }
-  const adults = distribute(search.adults, search.rooms, 1);
-  const children = distribute(search.children, search.rooms);
-  const infants = distribute(search.infants, search.rooms);
-  return adults.map((adultCount, index): RoomSelection => {
-    const childCount = children[index] ?? 0;
-    const capacityExcess = Math.max(
-      0,
-      adultCount - room.maximumAdults,
-      adultCount + childCount - room.maximumTotalGuests,
-    );
-    const increment = Math.max(1, room.extraBedCapacityIncrement);
-    const extraBedQuantity = Math.ceil(capacityExcess / increment);
-    if (
-      childCount > room.maximumChildren ||
-      extraBedQuantity > room.maximumExtraBeds ||
-      (extraBedQuantity > 0 && !room.extraBedAllowed)
-    ) {
+  const occupants = selectedRooms.map((room) => ({
+    room,
+    adults: 1,
+    children: 0,
+  }));
+  let adultsRemaining = search.adults - selectedRooms.length;
+  while (adultsRemaining > 0) {
+    const candidate = occupants
+      .filter(({ room, adults, children }) =>
+        roomCanHold(room, adults + 1, children),
+      )
+      .sort((left, right) => {
+        const leftCapacity =
+          left.room.maximumTotalGuests - left.adults - left.children;
+        const rightCapacity =
+          right.room.maximumTotalGuests - right.adults - right.children;
+        return rightCapacity - leftCapacity;
+      })[0];
+    if (!candidate) {
       throw new Error(
         search.locale === "id"
-          ? "Jumlah tamu melebihi kapasitas tipe kamar ini. Pilih tipe kamar lain atau ubah pencarian."
-          : "The guest count exceeds this room type's capacity. Choose another room type or change your search.",
+          ? "Kombinasi kamar yang dipilih tidak mencukupi jumlah tamu. Pilih tipe kamar lain."
+          : "The selected room combination cannot accommodate all guests. Choose another room type.",
       );
     }
+    candidate.adults += 1;
+    adultsRemaining -= 1;
+  }
+  let childrenRemaining = search.children;
+  while (childrenRemaining > 0) {
+    const candidate = occupants
+      .filter(({ room, adults, children }) =>
+        roomCanHold(room, adults, children + 1),
+      )
+      .sort((left, right) => {
+        const leftCapacity =
+          left.room.maximumTotalGuests - left.adults - left.children;
+        const rightCapacity =
+          right.room.maximumTotalGuests - right.adults - right.children;
+        return rightCapacity - leftCapacity;
+      })[0];
+    if (!candidate) {
+      throw new Error(
+        search.locale === "id"
+          ? "Kombinasi kamar yang dipilih tidak mencukupi jumlah tamu anak. Pilih tipe kamar lain."
+          : "The selected room combination cannot accommodate all children. Choose another room type.",
+      );
+    }
+    candidate.children += 1;
+    childrenRemaining -= 1;
+  }
+  const infants = distribute(search.infants, search.rooms);
+  return occupants.map(({ room, adults, children }, index): RoomSelection => {
+    const extraBedQuantity = requiredExtraBeds(room, adults, children);
     return {
       roomTypeId: room.id,
-      adults: adultCount,
-      children: childCount,
+      ratePlanCode: room.offer!.ratePlanCode,
+      adults,
+      children,
       infants: infants[index] ?? 0,
       extraBedQuantity,
     };
@@ -243,35 +398,99 @@ export function BookingResultContent({
   result,
   loading,
   error,
-  onSelect,
-  selectingRoomId,
+  selectedRoomCounts = {},
+  onChangeSelection,
+  onContinue,
+  selectionPending = false,
+  selectionLocked = false,
 }: {
   search: SearchInput;
   result: AvailabilityResponse | null;
   loading: boolean;
   error: string;
-  onSelect?: (room: AvailabilityRoom) => void;
-  selectingRoomId?: string | null;
+  selectedRoomCounts?: Record<string, number>;
+  onChangeSelection?: (room: AvailabilityRoom, delta: -1 | 1) => void;
+  onContinue?: () => void;
+  selectionPending?: boolean;
+  selectionLocked?: boolean;
 }) {
+  const selectedTotal = Object.values(selectedRoomCounts).reduce(
+    (total, quantity) => total + quantity,
+    0,
+  );
+  const selectedLabels =
+    result?.roomTypes
+      .filter((room) => (selectedRoomCounts[room.id] ?? 0) > 0)
+      .map((room) => ({
+        id: room.id,
+        name: search.locale === "en" ? room.nameEn : room.nameId,
+        quantity: selectedRoomCounts[room.id] ?? 0,
+      })) ?? [];
   return (
     <section className="booking-results" aria-live="polite">
       {!loading && result?.roomTypes.length ? (
         <div className="booking-results-intro">
           <div>
             <p className="eyebrow">
-              {search.locale === "id" ? "Kamar tersedia" : "Available rooms"}
+              {search.locale === "id"
+                ? `${result.roomTypes.length} pilihan kamar`
+                : `${result.roomTypes.length} room options`}
             </p>
             <h2>
               {search.locale === "id"
-                ? "Pilih ruang untuk beristirahat"
-                : "Choose your place to unwind"}
+                ? "Kamar untuk masa tinggal Anda"
+                : "Rooms for your stay"}
             </h2>
           </div>
           <p>
             {search.locale === "id"
-              ? "Harga final dihitung sebelum Anda mengisi data tamu. Nomor kamar ditentukan Front Office menjelang kedatangan."
-              : "Your final price is calculated before guest details. The room number is assigned by Front Office closer to arrival."}
+              ? "Pilih jenis kamar yang sesuai. Nomor kamar fisik akan disiapkan Front Office menjelang kedatangan."
+              : "Choose the room type that suits you. Your physical room number will be prepared by Front Office closer to arrival."}
           </p>
+        </div>
+      ) : null}
+      {!loading && result?.roomTypes.length ? (
+        <div className="booking-selection-tray">
+          <div>
+            <span>
+              {search.locale === "id"
+                ? `${selectedTotal} dari ${result.requestedRooms} kamar dipilih`
+                : `${selectedTotal} of ${result.requestedRooms} rooms selected`}
+            </span>
+            <div className="booking-selection-items">
+              {selectedLabels.length
+                ? selectedLabels.map((item) => (
+                    <small key={item.id}>
+                      {item.quantity}× {item.name}
+                    </small>
+                  ))
+                : search.locale === "id"
+                  ? "Anda dapat menggabungkan tipe kamar yang berbeda."
+                  : "You may combine different room types."}
+            </div>
+          </div>
+          <button
+            className="button"
+            disabled={
+              selectionLocked ||
+              selectionPending ||
+              selectedTotal !== result.requestedRooms
+            }
+            onClick={onContinue}
+            type="button"
+          >
+            {selectionPending
+              ? search.locale === "id"
+                ? "Menghitung…"
+                : "Calculating…"
+              : selectionLocked
+                ? search.locale === "id"
+                  ? "Pilihan dikonfirmasi"
+                  : "Selection confirmed"
+                : search.locale === "id"
+                  ? "Lanjutkan"
+                  : "Continue"}
+          </button>
         </div>
       ) : null}
       {loading ? (
@@ -286,10 +505,16 @@ export function BookingResultContent({
       {result
         ? result.roomTypes.map((room, index) => {
             const name = search.locale === "en" ? room.nameEn : room.nameId;
-            const canBook = room.available && Boolean(room.offer);
+            const selectedCount = selectedRoomCounts[room.id] ?? 0;
+            const canSelect = room.availableRooms > 0 && Boolean(room.offer);
+            const canIncrease =
+              canSelect &&
+              !selectionLocked &&
+              selectedCount < room.availableRooms &&
+              selectedTotal < result.requestedRooms;
             return (
               <article
-                className={`availability-card ${canBook ? "" : "is-unavailable"}`}
+                className={`availability-card ${canSelect ? "" : "is-unavailable"} ${selectedCount ? "is-selected" : ""}`}
                 key={room.id}
               >
                 <div className="availability-card-image">
@@ -300,39 +525,45 @@ export function BookingResultContent({
                     priority={index === 0}
                     sizes="(max-width: 760px) 100vw, 42vw"
                   />
-                  <span>{room.code}</span>
+                  <span>KOOKA Residence · {name}</span>
                 </div>
                 <div className="availability-card-copy">
                   <div>
                     <p className="room-meta">
-                      {canBook
+                      {canSelect
                         ? search.locale === "id"
                           ? `${room.availableRooms} kamar tersedia`
-                          : `${room.availableRooms} rooms available`
+                          : `${room.availableRooms} ${room.availableRooms === 1 ? "room" : "rooms"} available`
                         : room.offer && room.availableRooms === 0
                           ? search.locale === "id"
-                            ? "Sedang ditahan sementara"
-                            : "Temporarily held"
-                          : room.offer &&
-                              room.availableRooms < result.requestedRooms
-                            ? search.locale === "id"
-                              ? `Hanya ${room.availableRooms} kamar tersedia`
-                              : `Only ${room.availableRooms} rooms available`
-                            : search.locale === "id"
-                              ? "Belum dapat dipesan"
-                              : "Not bookable yet"}
+                            ? "Tidak tersedia pada tanggal ini"
+                            : "Unavailable for selected dates"
+                          : search.locale === "id"
+                            ? "Tidak tersedia untuk booking online"
+                            : "Unavailable for online booking"}
                     </p>
                     <h3>{name}</h3>
-                    <p className="room-capacity">
-                      {search.locale === "id"
-                        ? `Maksimal ${room.maximumTotalGuests} tamu`
-                        : `Up to ${room.maximumTotalGuests} guests`}
-                      {room.extraBedAllowed
-                        ? search.locale === "id"
-                          ? ` · Extra bed hingga ${room.maximumExtraBeds}`
-                          : ` · Up to ${room.maximumExtraBeds} extra bed`
-                        : ""}
-                    </p>
+                    <ul className="availability-features">
+                      <li>
+                        {search.locale === "id"
+                          ? `Maks. ${room.maximumTotalGuests} tamu`
+                          : `Up to ${room.maximumTotalGuests} guests`}
+                      </li>
+                      <li>
+                        {search.locale === "id"
+                          ? `Maks. ${room.maximumAdults} dewasa`
+                          : `Up to ${room.maximumAdults} adults`}
+                      </li>
+                      <li>
+                        {room.extraBedAllowed
+                          ? search.locale === "id"
+                            ? `Extra bed hingga ${room.maximumExtraBeds}`
+                            : `Up to ${room.maximumExtraBeds} extra bed`
+                          : search.locale === "id"
+                            ? "Tanpa extra bed"
+                            : "No extra bed"}
+                      </li>
+                    </ul>
                   </div>
                   <div className="availability-card-action">
                     {room.offer ? (
@@ -345,31 +576,71 @@ export function BookingResultContent({
                         <strong>{money(room.offer.nightlyFromIdr)}</strong>
                         <span>
                           {search.locale === "id"
-                            ? "Pembayaran resmi dalam IDR"
-                            : "Official payment in IDR"}
+                            ? `${result.nights} malam · total ${money(room.offer.estimatedStayIdr)}`
+                            : `${result.nights} nights · ${money(room.offer.estimatedStayIdr)} total`}
                         </span>
+                        <em className="room-tax-note">
+                          {search.locale === "id"
+                            ? "Pajak dan biaya layanan, jika berlaku, ditampilkan di ringkasan sebelum booking."
+                            : "Taxes and service charges, if applicable, are shown in the summary before booking."}
+                        </em>
                       </div>
                     ) : (
                       <p className="room-rate-missing">
                         {search.locale === "id"
-                          ? "Tarif online belum dikonfigurasi."
-                          : "The online rate is not configured yet."}
+                          ? "Kamar ini belum tersedia untuk booking online. Silakan pilih kamar lain."
+                          : "This room is not currently available for online booking. Please choose another room."}
                       </p>
                     )}
-                    <button
-                      className="button"
-                      type="button"
-                      disabled={!canBook || selectingRoomId === room.id}
-                      onClick={() => onSelect?.(room)}
-                    >
-                      {selectingRoomId === room.id
-                        ? search.locale === "id"
-                          ? "Menghitung…"
-                          : "Calculating…"
-                        : search.locale === "id"
-                          ? "Pilih kamar"
-                          : "Select room"}
-                    </button>
+                    {selectedCount > 0 ? (
+                      <div className="room-quantity-control">
+                        <button
+                          aria-label={
+                            search.locale === "id"
+                              ? `Kurangi ${name}`
+                              : `Remove ${name}`
+                          }
+                          disabled={selectionLocked}
+                          onClick={() => onChangeSelection?.(room, -1)}
+                          type="button"
+                        >
+                          −
+                        </button>
+                        <span>
+                          <strong>{selectedCount}</strong>
+                          <small>
+                            {search.locale === "id" ? "dipilih" : "selected"}
+                          </small>
+                        </span>
+                        <button
+                          aria-label={
+                            search.locale === "id"
+                              ? `Tambah ${name}`
+                              : `Add ${name}`
+                          }
+                          disabled={!canIncrease}
+                          onClick={() => onChangeSelection?.(room, 1)}
+                          type="button"
+                        >
+                          +
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={!canIncrease}
+                        onClick={() => onChangeSelection?.(room, 1)}
+                      >
+                        {search.locale === "id"
+                          ? canSelect
+                            ? "Tambah kamar"
+                            : "Tidak tersedia"
+                          : canSelect
+                            ? "Add room"
+                            : "Unavailable"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </article>
@@ -387,6 +658,46 @@ export function BookingResultContent({
   );
 }
 
+function BookingProgress({
+  locale,
+  currentStep,
+}: {
+  locale: PublicLocale;
+  currentStep: 2 | 3;
+}) {
+  const steps =
+    locale === "id"
+      ? ["Pencarian", "Pilih kamar", "Data tamu", "Pembayaran"]
+      : ["Search", "Choose room", "Guest details", "Payment"];
+  return (
+    <nav
+      aria-label={locale === "id" ? "Tahapan booking" : "Booking progress"}
+      className="booking-progress"
+    >
+      <ol>
+        {steps.map((step, index) => {
+          const number = index + 1;
+          return (
+            <li
+              className={
+                number < currentStep
+                  ? "is-complete"
+                  : number === currentStep
+                    ? "is-current"
+                    : ""
+              }
+              key={step}
+            >
+              <span>{number < currentStep ? "✓" : number}</span>
+              <strong>{step}</strong>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
 function BookingConfirmation({
   reservation,
   email,
@@ -396,6 +707,7 @@ function BookingConfirmation({
   email: string;
   locale: PublicLocale;
 }) {
+  const [paymentExpired, setPaymentExpired] = useState(false);
   const paymentInstructions = reservation.paymentInstructions?.length
     ? reservation.paymentInstructions
     : reservation.paymentInstruction
@@ -423,15 +735,28 @@ function BookingConfirmation({
           {locale === "id" ? "Booking berhasil dibuat" : "Booking created"}
         </p>
         <h1>
-          {locale === "id"
-            ? "Kamar Anda sedang kami tahan."
-            : "Your room is being held."}
+          {paymentExpired
+            ? locale === "id"
+              ? "Waktu pembayaran telah berakhir."
+              : "Your payment time has ended."
+            : locale === "id"
+              ? "Kamar Anda sedang kami tahan."
+              : "Your room is being held."}
         </h1>
         <p>
-          {locale === "id"
-            ? "Selesaikan transfer sebelum batas waktu, lalu kirim bukti pembayaran ke WhatsApp KOOKA."
-            : "Complete the transfer before the deadline, then send your payment proof to KOOKA via WhatsApp."}
+          {paymentExpired
+            ? locale === "id"
+              ? "Periksa status terbaru melalui View Booking sebelum melakukan tindakan berikutnya."
+              : "Check the latest status through View Booking before taking the next step."
+            : locale === "id"
+              ? "Selesaikan transfer sebelum batas waktu, lalu kirim bukti pembayaran ke WhatsApp KOOKA."
+              : "Complete the transfer before the deadline, then send your payment proof to KOOKA via WhatsApp."}
         </p>
+        <PaymentCountdown
+          deadlineAt={reservation.paymentDeadlineAt}
+          locale={locale}
+          onExpire={() => setPaymentExpired(true)}
+        />
       </section>
       <section className="booking-confirmation-grid">
         <article className="booking-code-card">
@@ -539,13 +864,14 @@ export default function BookingResults({ search }: { search: SearchInput }) {
   const [result, setResult] = useState<AvailabilityResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectedRoom, setSelectedRoom] = useState<AvailabilityRoom | null>(
-    null,
-  );
+  const [selectedRoomCounts, setSelectedRoomCounts] = useState<
+    Record<string, number>
+  >({});
+  const [quotedRooms, setQuotedRooms] = useState<AvailabilityRoom[]>([]);
   const [selections, setSelections] = useState<RoomSelection[]>([]);
   const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [quoteError, setQuoteError] = useState("");
-  const [selectingRoomId, setSelectingRoomId] = useState<string | null>(null);
+  const [selectionPending, setSelectionPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reservation, setReservation] = useState<ReservationResponse | null>(
     null,
@@ -598,12 +924,54 @@ export default function BookingResults({ search }: { search: SearchInput }) {
     [search.checkInDate, search.checkoutDate, search.locale],
   );
 
-  async function selectRoom(room: AvailabilityRoom) {
-    if (!room.offer) return;
+  const quotedRoomLabel = useMemo(() => {
+    const counts = new Map<string, { room: AvailabilityRoom; count: number }>();
+    for (const room of quotedRooms) {
+      const current = counts.get(room.id);
+      counts.set(room.id, { room, count: (current?.count ?? 0) + 1 });
+    }
+    return [...counts.values()]
+      .map(({ room, count }) => {
+        const name = search.locale === "en" ? room.nameEn : room.nameId;
+        return `${count}× ${name}`;
+      })
+      .join(" + ");
+  }, [quotedRooms, search.locale]);
+
+  function changeRoomSelection(room: AvailabilityRoom, delta: -1 | 1) {
+    if (quote) return;
     setQuoteError("");
-    setSelectingRoomId(room.id);
+    setSelectedRoomCounts((current) => {
+      const selectedTotal = Object.values(current).reduce(
+        (total, quantity) => total + quantity,
+        0,
+      );
+      const currentCount = current[room.id] ?? 0;
+      const nextCount = Math.max(
+        0,
+        Math.min(room.availableRooms, currentCount + delta),
+      );
+      if (delta > 0 && selectedTotal >= search.rooms) return current;
+      if (nextCount === currentCount) return current;
+      const next = { ...current };
+      if (nextCount === 0) delete next[room.id];
+      else next[room.id] = nextCount;
+      return next;
+    });
+  }
+
+  async function continueWithSelection() {
+    if (!result) return;
+    const nextRooms = result.roomTypes.flatMap((room) =>
+      Array.from({ length: selectedRoomCounts[room.id] ?? 0 }, () => room),
+    );
+    if (nextRooms.length !== search.rooms) return;
+    setQuoteError("");
+    setSelectionPending(true);
     try {
-      const nextSelections = roomSelections(search, room);
+      const nextSelections = roomSelections(search, nextRooms);
+      const fallbackRatePlanCode = nextRooms[0]?.offer?.ratePlanCode;
+      if (!fallbackRatePlanCode) return;
       const nextQuote = await responseJson<QuoteResponse>(
         await fetch("/api/booking/quote", {
           method: "POST",
@@ -614,14 +982,14 @@ export default function BookingResults({ search }: { search: SearchInput }) {
           body: JSON.stringify({
             checkInDate: search.checkInDate,
             checkoutDate: search.checkoutDate,
-            ratePlanCode: room.offer.ratePlanCode,
+            ratePlanCode: fallbackRatePlanCode,
             language: search.locale,
             displayCurrency: search.currency,
             rooms: nextSelections,
           }),
         }),
       );
-      setSelectedRoom(room);
+      setQuotedRooms(nextRooms);
       setSelections(nextSelections);
       setQuote(nextQuote);
       setAcknowledged([]);
@@ -639,8 +1007,21 @@ export default function BookingResults({ search }: { search: SearchInput }) {
             : "The price could not be calculated.",
       );
     } finally {
-      setSelectingRoomId(null);
+      setSelectionPending(false);
     }
+  }
+
+  function editRoomSelection() {
+    setQuote(null);
+    setQuotedRooms([]);
+    setSelections([]);
+    setAcknowledged([]);
+    setQuoteError("");
+    requestAnimationFrame(() =>
+      document
+        .querySelector(".booking-results")
+        ?.scrollIntoView({ behavior: "smooth" }),
+    );
   }
 
   async function createReservation(event: FormEvent<HTMLFormElement>) {
@@ -710,39 +1091,33 @@ export default function BookingResults({ search }: { search: SearchInput }) {
             sizes="(max-width: 560px) 118px, 146px"
           />
         </Link>
-        <Link className="booking-back" href="/#availability">
-          ← {search.locale === "id" ? "Ubah pencarian" : "Change search"}
+        <Link className="booking-back" href="/">
+          ← {search.locale === "id" ? "Kembali ke KOOKA" : "Back to KOOKA"}
         </Link>
       </header>
 
+      <BookingProgress
+        currentStep={quote && quotedRooms.length ? 3 : 2}
+        locale={search.locale}
+      />
+
       <section className="booking-summary">
-        <p className="eyebrow">Direct booking · {search.currency}</p>
-        <h1>
-          {search.locale === "id" ? "Temukan jeda Anda." : "Find your pause."}
-        </h1>
-        <p className="booking-summary-lead">
-          {search.locale === "id"
-            ? "Pilih tipe kamar, lengkapi data tamu, lalu dapatkan kode booking dan instruksi transfer langsung dari sistem."
-            : "Choose a room, enter guest details, then receive your booking code and transfer instructions instantly."}
-        </p>
-        <div className="stay-facts">
-          <span>
-            <small>Check-in</small>
-            <strong>{dateLabel(search.checkInDate, search.locale)}</strong>
-          </span>
-          <span>
-            <small>Check-out</small>
-            <strong>{dateLabel(search.checkoutDate, search.locale)}</strong>
-          </span>
-          <span>
-            <small>{search.locale === "id" ? "Tamu" : "Guests"}</small>
-            <strong>{search.adults + search.children}</strong>
-          </span>
-          <span>
-            <small>{search.locale === "id" ? "Kamar" : "Rooms"}</small>
-            <strong>{search.rooms}</strong>
-          </span>
+        <div className="booking-summary-heading">
+          <div className="booking-summary-title">
+            <p className="eyebrow">Direct booking · {search.currency}</p>
+            <h1>
+              {search.locale === "id"
+                ? "Pilih kamar Anda."
+                : "Choose your room."}
+            </h1>
+          </div>
+          <p className="booking-summary-lead">
+            {search.locale === "id"
+              ? "Pilih kamar, lalu lengkapi data tamu untuk menerima kode booking."
+              : "Select a room, then enter your guest details to receive a booking code."}
+          </p>
         </div>
+        <BookingSearchForm search={search} />
       </section>
 
       <BookingResultContent
@@ -750,25 +1125,24 @@ export default function BookingResults({ search }: { search: SearchInput }) {
         result={result}
         loading={loading}
         error={error}
-        onSelect={selectRoom}
-        selectingRoomId={selectingRoomId}
+        selectedRoomCounts={selectedRoomCounts}
+        onChangeSelection={changeRoomSelection}
+        onContinue={continueWithSelection}
+        selectionPending={selectionPending}
+        selectionLocked={Boolean(quote)}
       />
 
       {quoteError && !quote ? (
         <div className="booking-inline-error">{quoteError}</div>
       ) : null}
 
-      {quote && selectedRoom ? (
+      {quote && quotedRooms.length ? (
         <section className="guest-checkout" id="guest-details">
           <div className="guest-checkout-summary">
             <p className="eyebrow">
               {search.locale === "id" ? "Pilihan Anda" : "Your selection"}
             </p>
-            <h2>
-              {search.locale === "en"
-                ? selectedRoom.nameEn
-                : selectedRoom.nameId}
-            </h2>
+            <h2>{quotedRoomLabel}</h2>
             <p>{displayStay}</p>
             <dl>
               <div>
@@ -776,6 +1150,26 @@ export default function BookingResults({ search }: { search: SearchInput }) {
                 <dd>{selections.length}</dd>
               </div>
               <div>
+                <dt>{search.locale === "id" ? "Subtotal" : "Subtotal"}</dt>
+                <dd>{money(quote.netAmountIdr)}</dd>
+              </div>
+              {quote.serviceChargeIdr > 0 ? (
+                <div>
+                  <dt>
+                    {search.locale === "id"
+                      ? "Biaya layanan"
+                      : "Service charge"}
+                  </dt>
+                  <dd>{money(quote.serviceChargeIdr)}</dd>
+                </div>
+              ) : null}
+              {quote.taxIdr > 0 ? (
+                <div>
+                  <dt>{search.locale === "id" ? "Pajak" : "Taxes"}</dt>
+                  <dd>{money(quote.taxIdr)}</dd>
+                </div>
+              ) : null}
+              <div className="quote-official-total">
                 <dt>
                   {search.locale === "id" ? "Total resmi" : "Official total"}
                 </dt>
@@ -794,9 +1188,19 @@ export default function BookingResults({ search }: { search: SearchInput }) {
             </dl>
             <p className="quote-expiry">
               {search.locale === "id"
-                ? `Harga dan kamar ditahan sampai ${dateTimeLabel(quote.expiresAt, search.locale)} WIB.`
-                : `This price and room are held until ${dateTimeLabel(quote.expiresAt, search.locale)} WIB.`}
+                ? `Harga berlaku sampai ${dateTimeLabel(quote.expiresAt, search.locale)} WIB. Kamar baru diamankan setelah booking berhasil dibuat.`
+                : `The price is valid until ${dateTimeLabel(quote.expiresAt, search.locale)} WIB. Rooms are secured only after the booking is created.`}
             </p>
+            <button
+              className="guest-selection-edit"
+              onClick={editRoomSelection}
+              type="button"
+            >
+              <span aria-hidden="true">←</span>
+              <strong>
+                {search.locale === "id" ? "Ubah pilihan kamar" : "Change rooms"}
+              </strong>
+            </button>
           </div>
           <form className="guest-details-form" onSubmit={createReservation}>
             <p className="eyebrow">

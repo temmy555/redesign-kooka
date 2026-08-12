@@ -19,13 +19,14 @@ describe("Technical Batch 2 database and worker contracts", () => {
   });
 
   it("registers durable quote/reservation expiry and email handlers", async () => {
-    const worker = await readFile(
-      `${root}/scripts/lib/outbox-handlers.mjs`,
-      "utf8",
-    );
+    const [worker, expiry] = await Promise.all([
+      readFile(`${root}/scripts/lib/outbox-handlers.mjs`, "utf8"),
+      readFile(`${root}/scripts/lib/reservation-expiry.mjs`, "utf8"),
+    ]);
     expect(worker).toContain('"booking.quote-expire"');
     expect(worker).toContain('"booking.reservation-expire"');
     expect(worker).toContain('"notification.email"');
-    expect(worker).toContain("payment-review-hold");
+    expect(expiry).toContain("payment-review-hold");
+    expect(expiry).toContain("booking.reservation.expire.reconciled");
   });
 });

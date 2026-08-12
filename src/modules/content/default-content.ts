@@ -15,9 +15,11 @@ const baselineSections: LandingSection[] = [
       body: "Beristirahatlah di rumah taman kami yang asri. Nikmati suasana hijau dan ruang yang personal, tetap dekat dengan kebutuhan kota.",
       bookingNote:
         "Pesan langsung untuk pengalaman menginap yang lebih personal",
-      imageUrl: "/images/agoda-kooka/property-entrance.jpg",
+      imageUrl: "/images/kooka-assets/ark-05080.jpg",
+      heroVideoUrl: "/videos/kooka-assets/kooka-morning-vibes.mov",
       imageAlt: "Pintu masuk KOOKA Residence Surabaya",
-      imageLabel: "KOOKA Residence · Surabaya, Indonesia",
+      imageLabel: "KOOKA Residence",
+      sectionCaption: "Foto dan video dari aset terbaru KOOKA",
     },
   },
   {
@@ -68,9 +70,9 @@ const baselineSections: LandingSection[] = [
         "Layanan hangat dan personal selama menginap",
       ],
       images: [
-        "/images/agoda-kooka/facility-garden.jpg",
-        "/images/agoda-kooka/room-mezzanine-guestroom.jpg",
-        "/images/agoda-kooka/facility-balcony-01.jpg",
+        "/images/kooka-assets/ark-05100.jpg",
+        "/images/kooka-assets/ark-05070.jpg",
+        "/images/kooka-assets/img-4444.jpg",
       ],
     },
   },
@@ -83,9 +85,9 @@ const baselineSections: LandingSection[] = [
       titleAccent: "momen di KOOKA.",
       quote: "A slower, softer way to stay in Surabaya.",
       images: [
-        "/images/agoda-kooka/room-two-bedroom-villa-interior.jpg",
-        "/images/agoda-kooka/property-exterior-02.jpg",
-        "/images/agoda-kooka/facility-garden.jpg",
+        "/images/kooka-assets/ark-05090.jpg",
+        "/images/kooka-assets/ark-05120.jpg",
+        "/images/kooka-assets/img-4465.jpg",
       ],
     },
   },
@@ -152,9 +154,11 @@ const englishByKey: Record<string, Record<string, unknown>> = {
     titleAccent: "comfortable stay in Surabaya.",
     body: "Rest in our leafy garden home. Enjoy green surroundings and personal spaces while staying close to the city’s essentials.",
     bookingNote: "Book direct for a more personal stay",
-    imageUrl: "/images/agoda-kooka/property-entrance.jpg",
+    imageUrl: "/images/kooka-assets/ark-05080.jpg",
+    heroVideoUrl: "/videos/kooka-assets/kooka-morning-vibes.mov",
     imageAlt: "Entrance to KOOKA Residence Surabaya",
-    imageLabel: "KOOKA Residence · Surabaya, Indonesia",
+    imageLabel: "KOOKA Residence",
+    sectionCaption: "Photos and video from latest KOOKA assets",
   },
   trust: {
     items: [
@@ -193,9 +197,9 @@ const englishByKey: Record<string, Record<string, unknown>> = {
       "Warm, personal care throughout your stay",
     ],
     images: [
-      "/images/agoda-kooka/facility-garden.jpg",
-      "/images/agoda-kooka/room-mezzanine-guestroom.jpg",
-      "/images/agoda-kooka/facility-balcony-01.jpg",
+      "/images/kooka-assets/ark-05100.jpg",
+      "/images/kooka-assets/ark-05070.jpg",
+      "/images/kooka-assets/img-4444.jpg",
     ],
   },
   gallery: {
@@ -204,9 +208,9 @@ const englishByKey: Record<string, Record<string, unknown>> = {
     titleAccent: "moments at KOOKA.",
     quote: "A slower, softer way to stay in Surabaya.",
     images: [
-      "/images/agoda-kooka/room-two-bedroom-villa-interior.jpg",
-      "/images/agoda-kooka/property-exterior-02.jpg",
-      "/images/agoda-kooka/facility-garden.jpg",
+      "/images/kooka-assets/ark-05090.jpg",
+      "/images/kooka-assets/ark-05120.jpg",
+      "/images/kooka-assets/img-4465.jpg",
     ],
   },
   location: {

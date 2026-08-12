@@ -353,6 +353,12 @@ export async function createRoomTypeDraft(params: {
   assertEffectivePeriod(params.input.effectiveFrom, params.input.effectiveTo);
   const reason = reasonValue(params.input.reason);
   const code = normalizeMasterCode(params.input.code);
+  if (code.length > 40) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Kode jenis kamar tidak boleh lebih dari 40 karakter",
+    );
+  }
   const impact = await previewRoomTypeDraft(params);
   if (impact.blockers.length > 0) {
     throw new AppError("CONFLICT", impact.blockers[0] ?? "Capacity conflict");
@@ -880,6 +886,12 @@ export async function createResourcePool(params: {
     );
   }
   const code = normalizeMasterCode(params.code);
+  if (code.length > 64) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Kode persediaan tidak boleh lebih dari 64 karakter",
+    );
+  }
   return getDatabase().transaction(async (tx) => {
     const [created] = await tx
       .insert(resourcePools)

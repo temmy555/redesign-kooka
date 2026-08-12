@@ -152,6 +152,18 @@ describe("room master service", () => {
     ).rejects.toThrow("Invalid room capacity values");
   });
 
+  it("rejects room type codes that exceed the physical column limit", async () => {
+    await expect(
+      createRoomTypeDraft({
+        session,
+        propertyId: U1,
+        input: { ...draft, code: "R".repeat(41) },
+      }),
+    ).rejects.toThrow("tidak boleh lebih dari 40 karakter");
+
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it("creates a versioned room type with owned amenities", async () => {
     mocks.select
       .mockReturnValueOnce(chain([{ versionNumber: 1 }]))
@@ -284,6 +296,17 @@ describe("room master service", () => {
         reason: "Invalid capacity check",
       }),
     ).rejects.toThrow("non-negative integer");
+    await expect(
+      createResourcePool({
+        session,
+        propertyId: U1,
+        code: "R".repeat(65),
+        nameId: "Persediaan",
+        nameEn: "Inventory",
+        physicalCapacity: 1,
+        reason: "Validate resource code length",
+      }),
+    ).rejects.toThrow("tidak boleh lebih dari 64 karakter");
   });
 
   it.each([

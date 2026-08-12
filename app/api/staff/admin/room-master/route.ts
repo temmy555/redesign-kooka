@@ -24,7 +24,7 @@ export const runtime = "nodejs";
 const reason = z.string().trim().min(3).max(500);
 const roomTypeInput = z.object({
   roomTypeId: z.string().uuid().optional(),
-  code: z.string().trim().min(1).max(80),
+  code: z.string().trim().min(1).max(40),
   nameId: z.string().trim().min(1).max(160),
   nameEn: z.string().trim().min(1).max(160),
   descriptionId: z.string().nullable().optional(),

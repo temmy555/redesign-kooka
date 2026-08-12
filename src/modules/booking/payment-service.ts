@@ -863,4 +863,28 @@ async function expireReservationInTransaction(
       select id from reservation_rooms where reservation_id = ${reservationId}
     ) and claim_status = 'ACTIVE'
   `);
+  const closedFolios = await tx
+    .update(folios)
+    .set({
+      status: "CLOSED",
+      closedAt: now,
+      closedByUserId: actorUserId,
+      updatedAt: now,
+      updatedByUserId: actorUserId,
+    })
+    .where(
+      and(eq(folios.reservationId, reservationId), eq(folios.status, "OPEN")),
+    )
+    .returning({ id: folios.id });
+  if (closedFolios[0]) {
+    await tx.insert(folioStatusEvents).values({
+      folioId: closedFolios[0].id,
+      action: "CLOSE_AFTER_RESERVATION_EXPIRY",
+      fromStatus: "OPEN",
+      toStatus: "CLOSED",
+      reason,
+      actorUserId,
+      createdByUserId: actorUserId,
+    });
+  }
 }

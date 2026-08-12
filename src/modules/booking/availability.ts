@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import { getDatabase } from "../../db";
@@ -143,6 +143,9 @@ export async function readInventoryAvailability(
           and(
             inArray(inventoryClaims.inventoryDayId, dayIds),
             eq(inventoryClaims.claimStatus, "ACTIVE"),
+            // A quote is only a price snapshot. Inventory starts being held
+            // after the customer submits Book Now and a reservation exists.
+            ne(inventoryClaims.claimType, "CHECKOUT_HOLD"),
             sql`(${inventoryClaims.expiresAt} is null or ${inventoryClaims.expiresAt} > ${now})`,
           ),
         )

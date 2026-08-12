@@ -6,6 +6,7 @@ import {
   getMediaOverview,
   linkCmsMedia,
   publishCmsMedia,
+  setRoomTypeGallery,
   uploadCmsMedia,
 } from "../../../../../src/modules/content/media-service";
 import { AuthorizationError } from "../../../../../src/platform/authorization";
@@ -37,6 +38,11 @@ const mediaActionSchema = z.discriminatedUnion("action", [
     ]),
     targetId: z.string().uuid(),
     sortOrder: z.number().int().min(0).max(10_000),
+  }),
+  z.object({
+    action: z.literal("SET_ROOM_GALLERY"),
+    roomTypeId: z.string().uuid(),
+    assetIds: z.array(z.string().uuid()).min(1).max(20),
   }),
 ]);
 
@@ -112,6 +118,11 @@ export async function PATCH(request: Request) {
     if (body.action === "ARCHIVE") {
       return NextResponse.json(
         await archiveCmsMedia({ ...requestContext, ...body }),
+      );
+    }
+    if (body.action === "SET_ROOM_GALLERY") {
+      return NextResponse.json(
+        await setRoomTypeGallery({ ...requestContext, ...body }),
       );
     }
     return NextResponse.json(

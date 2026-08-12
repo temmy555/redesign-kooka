@@ -183,6 +183,28 @@ function isoDate(value: Date) {
   return `${year}-${month}-${day}`;
 }
 
+export function publicDateFromToday(offset: number, now = new Date()) {
+  const jakartaParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(now)
+    .reduce<Record<string, string>>((parts, part) => {
+      if (part.type !== "literal") parts[part.type] = part.value;
+      return parts;
+    }, {});
+  const date = new Date(
+    Date.UTC(
+      Number(jakartaParts.year),
+      Number(jakartaParts.month) - 1,
+      Number(jakartaParts.day) + offset,
+    ),
+  );
+  return date.toISOString().slice(0, 10);
+}
+
 function monthDays(month: Date) {
   const first = new Date(month.getFullYear(), month.getMonth(), 1);
   const mondayOffset = (first.getDay() + 6) % 7;

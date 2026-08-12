@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
   decryptSensitiveValue: vi.fn(),
   enqueueOutboxEvent: vi.fn(),
   withIdempotency: vi.fn(),
+  ensureInventoryDays: vi.fn(),
+  readInventoryAvailability: vi.fn(),
+  assertInventoryAvailable: vi.fn(),
 }));
 
 vi.mock("../../src/platform/authorization", () => ({
@@ -43,11 +46,17 @@ vi.mock("../../src/platform/outbox", () => ({
 vi.mock("../../src/platform/idempotency", () => ({
   withIdempotency: mocks.withIdempotency,
 }));
+vi.mock("../../src/modules/booking/availability", () => ({
+  ensureInventoryDays: mocks.ensureInventoryDays,
+  readInventoryAvailability: mocks.readInventoryAvailability,
+  assertInventoryAvailable: mocks.assertInventoryAvailable,
+}));
 
 import {
   cancelReservation,
   createReservation,
 } from "../../src/modules/booking/reservation-service";
+import { folios, folioStatusEvents } from "../../src/db/schema";
 
 const U1 = "11111111-1111-4111-a111-111111111111";
 const U2 = "22222222-2222-4222-a222-222222222222";
@@ -74,6 +83,19 @@ describe("reservation conversion and cancellation", () => {
     mocks.recordAuditEvent.mockResolvedValue(undefined);
     mocks.decryptSensitiveValue.mockReturnValue("123456789012");
     mocks.enqueueOutboxEvent.mockResolvedValue(undefined);
+    mocks.ensureInventoryDays.mockResolvedValue(undefined);
+    mocks.readInventoryAvailability.mockResolvedValue([
+      {
+        inventoryDayId: U4,
+        roomTypeId: U4,
+        stayDate: "2099-08-03",
+        physicalCapacity: 2,
+        claimed: 0,
+        available: 2,
+        salesClosed: false,
+      },
+    ]);
+    mocks.assertInventoryAvailable.mockReturnValue(undefined);
     mocks.insert.mockReturnValue(chain());
     mocks.update.mockReturnValue(chain());
     mocks.execute.mockResolvedValue({ rows: [] });
@@ -136,15 +158,6 @@ describe("reservation conversion and cancellation", () => {
         chain([
           {
             id: U1,
-            inventoryDayId: U4,
-            expiresAt: new Date("2099-08-03T00:00:00.000Z"),
-          },
-        ]),
-      )
-      .mockReturnValueOnce(
-        chain([
-          {
-            id: U1,
             paymentInstructionSetId: U2,
             cancellationPolicySetId: null,
           },
@@ -170,10 +183,18 @@ describe("reservation conversion and cancellation", () => {
         ]),
       )
       .mockReturnValueOnce(chain([]))
-      .mockReturnValueOnce(chain([]))
-      .mockReturnValueOnce(chain([]))
       .mockReturnValueOnce(
-        chain([{ id: U4, roomTypeId: U4, stayDate: "2099-08-03" }]),
+        chain([
+          {
+            lifecycleStatus: "ACTIVE",
+            effectiveFrom: new Date("2020-01-01T00:00:00.000Z"),
+            effectiveTo: null,
+            values: {
+              onlineDeadlineMinutes: 90,
+              sameDayDeadlineMinutes: 45,
+            },
+          },
+        ]),
       )
       .mockReturnValueOnce(chain([]));
 
@@ -187,18 +208,19 @@ describe("reservation conversion and cancellation", () => {
       .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain([{ id: U4 }]))
       .mockReturnValueOnce(chain())
-      .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain([{ id: U2 }]))
       .mockReturnValueOnce(chain([{ id: U3 }]))
       .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain([{ id: U3 }]))
       .mockReturnValueOnce(chain([{ id: U4 }]));
 
+    const startedAt = Date.now();
     const result = await createReservation({
       propertyId: U1,
       input: onlineInput,
       idempotencyKey: "reservation-online-1",
     });
+    const finishedAt = Date.now();
 
     expect(result).toMatchObject({
       reservationId: U1,
@@ -212,8 +234,17 @@ describe("reservation conversion and cancellation", () => {
     });
     expect(mocks.enqueueOutboxEvent).toHaveBeenCalledOnce();
     expect(mocks.enqueueOutboxEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ topic: "booking.reservation-expire" }),
+      expect.objectContaining({
+        topic: "booking.reservation-expire",
+        availableAt: new Date(result.paymentDeadlineAt!),
+      }),
       expect.anything(),
+    );
+    expect(
+      new Date(result.paymentDeadlineAt!).getTime(),
+    ).toBeGreaterThanOrEqual(startedAt + 90 * 60_000);
+    expect(new Date(result.paymentDeadlineAt!).getTime()).toBeLessThanOrEqual(
+      finishedAt + 90 * 60_000,
     );
     expect(mocks.recordAuditEvent).toHaveBeenCalledOnce();
   });
@@ -291,8 +322,16 @@ describe("reservation conversion and cancellation", () => {
       .mockReturnValueOnce(chain([quoteRoom]))
       .mockReturnValueOnce(chain([quoteNight]))
       .mockReturnValueOnce(
-        chain([{ id: U1, inventoryDayId: U4, expiresAt: null }]),
+        chain([
+          {
+            id: U2,
+            resourcePoolId: U4,
+            stayDate: "2099-08-03",
+            physicalCapacity: 5,
+          },
+        ]),
       )
+      .mockReturnValueOnce(chain([]))
       .mockReturnValueOnce(
         chain([
           {
@@ -324,20 +363,7 @@ describe("reservation conversion and cancellation", () => {
         ]),
       )
       .mockReturnValueOnce(chain([]))
-      .mockReturnValueOnce(
-        chain([{ id: U4, roomTypeId: U4, stayDate: "2099-08-03" }]),
-      )
-      .mockReturnValueOnce(
-        chain([
-          {
-            id: U1,
-            bookingQuoteRoomId: U3,
-            resourceInventoryDayId: U2,
-            quantity: 1,
-            expiresAt: null,
-          },
-        ]),
-      );
+      .mockReturnValueOnce(chain([]));
     mocks.insert
       .mockReturnValueOnce(chain([{ id: U1 }]))
       .mockReturnValueOnce(chain())
@@ -350,7 +376,6 @@ describe("reservation conversion and cancellation", () => {
       .mockReturnValueOnce(chain([{ id: U4 }]))
       .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain([{ id: U1 }]))
-      .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain([{ id: U2 }]))
       .mockReturnValueOnce(chain([{ id: U3 }]))
@@ -435,6 +460,7 @@ describe("reservation conversion and cancellation", () => {
     mocks.update
       .mockReturnValueOnce(chain())
       .mockReturnValueOnce(chain([{ id: U3 }]))
+      .mockReturnValueOnce(chain([{ id: U4 }]))
       .mockReturnValueOnce(chain());
     mocks.insert
       .mockReturnValueOnce(chain())
@@ -450,6 +476,8 @@ describe("reservation conversion and cancellation", () => {
     });
     expect(result).toEqual({ reservationId: U2, status: "CANCELLED" });
     expect(mocks.execute).toHaveBeenCalledTimes(3);
+    expect(mocks.update).toHaveBeenCalledWith(folios);
+    expect(mocks.insert).toHaveBeenCalledWith(folioStatusEvents);
   });
 
   it("rejects cancellation after a guest has checked in", async () => {

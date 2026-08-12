@@ -59,7 +59,7 @@ export async function grantUserRole(params: {
   effectiveFrom?: Date;
   effectiveTo?: Date;
   reason: string;
-}): Promise<void> {
+}): Promise<"granted" | "already_active"> {
   const { session, targetUserId, roleCode, propertyId } = params;
 
   if (session.user.id === targetUserId) throw new SelfRoleEditError();
@@ -67,16 +67,24 @@ export async function grantUserRole(params: {
 
   const effectiveFrom = params.effectiveFrom ?? new Date();
 
-  await getDatabase().transaction(async (tx) => {
+  const result = await getDatabase().transaction(async (tx) => {
     const roleId = await getRoleIdByCode(tx, roleCode);
-    await tx.insert(userRoles).values({
-      userId: targetUserId,
-      roleId,
-      propertyId,
-      effectiveFrom,
-      effectiveTo: params.effectiveTo,
-      grantedByUserId: session.user.id,
-    });
+    const [inserted] = await tx
+      .insert(userRoles)
+      .values({
+        userId: targetUserId,
+        roleId,
+        propertyId,
+        effectiveFrom,
+        effectiveTo: params.effectiveTo,
+        grantedByUserId: session.user.id,
+      })
+      // The exclusion constraint also protects concurrent double-clicks.
+      // Repeating an overlapping grant is an idempotent no-op, not a 500.
+      .onConflictDoNothing()
+      .returning({ userId: userRoles.userId });
+
+    if (!inserted) return "already_active" as const;
 
     await recordAuditEvent(
       {
@@ -96,16 +104,22 @@ export async function grantUserRole(params: {
       },
       tx,
     );
+
+    return "granted" as const;
   });
 
-  await recordSecurityEvent({
-    actorUserId: session.user.id,
-    category: "RBAC_ROLE_GRANTED",
-    result: "SUCCESS",
-    targetType: "user",
-    targetId: targetUserId,
-    details: { roleCode, propertyId },
-  });
+  if (result === "granted") {
+    await recordSecurityEvent({
+      actorUserId: session.user.id,
+      category: "RBAC_ROLE_GRANTED",
+      result: "SUCCESS",
+      targetType: "user",
+      targetId: targetUserId,
+      details: { roleCode, propertyId },
+    });
+  }
+
+  return result;
 }
 
 /**

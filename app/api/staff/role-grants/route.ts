@@ -49,8 +49,9 @@ export async function POST(request: Request) {
 
   const propertyId = await getActivePropertyId();
 
+  let status: "granted" | "already_active";
   try {
-    await grantUserRole({
+    status = await grantUserRole({
       session,
       targetUserId: body.targetUserId,
       roleCode: body.roleCode,
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  return NextResponse.json({ status: "granted" });
+  return NextResponse.json({ status });
 }
 
 export async function DELETE(request: Request) {

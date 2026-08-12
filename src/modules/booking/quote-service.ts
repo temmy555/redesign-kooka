@@ -1,13 +1,11 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import {
   bookingQuoteNights,
   bookingQuoteRooms,
   bookingQuotes,
-  inventoryClaimEvents,
-  inventoryClaims,
   propertySettingSets,
   propertySettingVersions,
   resourceClaims,
@@ -33,7 +31,7 @@ import {
 } from "./domain";
 import { resolveDisplayEstimate, resolveNightPrice } from "./pricing";
 
-const CHECKOUT_HOLD_MS = 15 * 60 * 1000;
+const QUOTE_VALIDITY_MS = 15 * 60 * 1000;
 const MAX_ROOMS_PER_BOOKING = 15;
 
 type ExtraBedPriceSnapshot =
@@ -109,7 +107,7 @@ export async function createBookingQuote(params: {
     },
     async (tx) => {
       const now = new Date();
-      const expiresAt = new Date(now.getTime() + CHECKOUT_HOLD_MS);
+      const expiresAt = new Date(now.getTime() + QUOTE_VALIDITY_MS);
       const roomTypeIds = [
         ...new Set(input.rooms.map((room) => room.roomTypeId)),
       ];
@@ -202,7 +200,6 @@ export async function createBookingQuote(params: {
             settingVersionId: string;
           }
         | undefined;
-      const extraBedInventoryByDate = new Map<string, string>();
       if (requestedExtraBeds > 0) {
         const [pool] = await tx
           .select()
@@ -325,6 +322,7 @@ export async function createBookingQuote(params: {
                   resourceDays.map((day) => day.id),
                 ),
                 eq(resourceClaims.claimStatus, "ACTIVE"),
+                isNotNull(resourceClaims.reservationRoomId),
                 sql`(${resourceClaims.expiresAt} is null or ${resourceClaims.expiresAt} > ${now})`,
               ),
             );
@@ -346,7 +344,6 @@ export async function createBookingQuote(params: {
                 "Requested extra beds are no longer available",
               );
             }
-            extraBedInventoryByDate.set(day.stayDate, day.id);
           }
         }
       }
@@ -361,7 +358,7 @@ export async function createBookingQuote(params: {
         for (const stayDate of stayDates) {
           const roomNight = await resolveNightPrice(tx, {
             propertyId: params.propertyId,
-            ratePlanCode: input.ratePlanCode,
+            ratePlanCode: room.ratePlanCode ?? input.ratePlanCode,
             roomTypeId: room.roomTypeId,
             stayDate,
             checkInDate: input.checkInDate,
@@ -419,6 +416,25 @@ export async function createBookingQuote(params: {
         (total, room) => total + room.totalIdr,
         0,
       );
+      const taxIdr = pricedRooms.reduce(
+        (roomTotal, room) =>
+          roomTotal +
+          room.nights.reduce(
+            (nightTotal, night) => nightTotal + night.taxIdr,
+            0,
+          ),
+        0,
+      );
+      const serviceChargeIdr = pricedRooms.reduce(
+        (roomTotal, room) =>
+          roomTotal +
+          room.nights.reduce(
+            (nightTotal, night) => nightTotal + night.serviceChargeIdr,
+            0,
+          ),
+        0,
+      );
+      const netAmountIdr = totalIdr - taxIdr - serviceChargeIdr;
       const display = await resolveDisplayEstimate(
         tx,
         params.propertyId,
@@ -482,17 +498,6 @@ export async function createBookingQuote(params: {
             },
           })),
         );
-        if (priced.room.extraBedQuantity > 0 && extraBedPoolId) {
-          await tx.insert(resourceClaims).values(
-            stayDates.map((stayDate) => ({
-              resourceInventoryDayId: extraBedInventoryByDate.get(stayDate)!,
-              bookingQuoteRoomId: quoteRoom.id,
-              quantity: priced.room.extraBedQuantity,
-              expiresAt,
-              idempotencyKey: `quote-extra-bed:${quote.id}:${quoteRoom.id}:${stayDate}`,
-            })),
-          );
-        }
         quoteRooms.push({
           id: quoteRoom.id,
           lineNumber: index + 1,
@@ -500,29 +505,6 @@ export async function createBookingQuote(params: {
         });
       }
 
-      for (const day of inventory) {
-        const quantity = quantities.get(day.roomTypeId) ?? 0;
-        if (!quantity) continue;
-        const [claim] = await tx
-          .insert(inventoryClaims)
-          .values({
-            inventoryDayId: day.inventoryDayId,
-            claimType: "CHECKOUT_HOLD",
-            sourceType: "BOOKING_QUOTE",
-            sourceId: quote.id,
-            quantity,
-            expiresAt,
-            idempotencyKey: `quote:${quote.id}:${day.inventoryDayId}`,
-          })
-          .returning({ id: inventoryClaims.id });
-        if (!claim) throw new Error("Failed to create checkout hold");
-        await tx.insert(inventoryClaimEvents).values({
-          inventoryClaimId: claim.id,
-          action: "CREATE_CHECKOUT_HOLD",
-          toStatus: "ACTIVE",
-          reason: "Customer quote checkout session",
-        });
-      }
       await enqueueOutboxEvent(
         {
           topic: "booking.quote-expire",
@@ -538,6 +520,9 @@ export async function createBookingQuote(params: {
         resultId: quote.id,
         response: {
           quoteId: quote.id,
+          netAmountIdr,
+          serviceChargeIdr,
+          taxIdr,
           totalIdr,
           displayCurrency: input.displayCurrency,
           displayTotal: display.displayTotal,

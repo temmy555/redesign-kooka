@@ -22,6 +22,7 @@ import { runAutomaticDailyOperations } from "./lib/daily-operations.mjs";
 import { loadLocalApplicationEnvironment } from "./lib/local-environment.mjs";
 import { createOutboxHandlers } from "./lib/outbox-handlers.mjs";
 import { processNextOutboxEvent } from "./lib/outbox-worker.mjs";
+import { reconcileExpiredReservationHolds } from "./lib/reservation-expiry.mjs";
 
 const OUTBOX_QUEUE_NAME = "outbox-dispatch";
 const OUTBOX_TICK_JOB_NAME = "drain";
@@ -58,6 +59,16 @@ async function main() {
     }
   }
 
+  async function runPeriodicOperations() {
+    const expiry = await reconcileExpiredReservationHolds(pool);
+    if (expiry.expiredReservations > 0) {
+      console.info(
+        `[worker] reconciled ${expiry.expiredReservations} overdue reservation(s); released ${expiry.releasedClaims} inventory claim(s)`,
+      );
+    }
+    await runAutomaticDailyOperations(pool, new Date(), rolloverHour);
+  }
+
   if (!environment.REDIS_URL) {
     let isDraining = false;
     let isRunningDailyOperations = false;
@@ -78,7 +89,7 @@ async function main() {
     const dailyOperationsTimer = setInterval(() => {
       if (isRunningDailyOperations) return;
       isRunningDailyOperations = true;
-      void runAutomaticDailyOperations(pool, new Date(), rolloverHour)
+      void runPeriodicOperations()
         .catch((error) => {
           console.error(
             `[worker] daily operations failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -90,7 +101,7 @@ async function main() {
     }, 60_000);
 
     await drainOutbox();
-    await runAutomaticDailyOperations(pool, new Date(), rolloverHour);
+    await runPeriodicOperations();
 
     console.log(
       `[worker] ${workerId} started without Redis; polling outbox every ${tickIntervalMs}ms`,
@@ -138,7 +149,7 @@ async function main() {
     OUTBOX_QUEUE_NAME,
     async (job) => {
       if (job.name === DAILY_OPERATIONS_JOB_NAME) {
-        await runAutomaticDailyOperations(pool, new Date(), rolloverHour);
+        await runPeriodicOperations();
         return;
       }
       if (job.name !== OUTBOX_TICK_JOB_NAME) return;

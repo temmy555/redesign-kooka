@@ -118,7 +118,7 @@ describe("booking quote service", () => {
     );
   });
 
-  it("creates a priced quote and physical room hold", async () => {
+  it("creates a priced quote without holding physical room inventory", async () => {
     mocks.select.mockReturnValueOnce(
       chain([
         {
@@ -144,19 +144,30 @@ describe("booking quote service", () => {
 
     const result = await createBookingQuote({
       propertyId: U1,
-      input,
+      input: {
+        ...input,
+        rooms: [{ ...room, ratePlanCode: "ROOM-BAR" }],
+      },
       idempotencyKey: "quote-1",
     });
 
     expect(result).toMatchObject({
       quoteId: U1,
+      netAmountIdr: 500000,
+      serviceChargeIdr: 0,
+      taxIdr: 50000,
       totalIdr: 550000,
       displayCurrency: "USD",
       displayTotal: 34.38,
       displayEstimated: true,
     });
     expect(mocks.assertInventoryAvailable).toHaveBeenCalledOnce();
+    expect(mocks.resolveNightPrice).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ratePlanCode: "ROOM-BAR" }),
+    );
     expect(mocks.enqueueOutboxEvent).toHaveBeenCalledOnce();
+    expect(mocks.insert).toHaveBeenCalledTimes(3);
   });
 
   it("requires a staff session for a manual quote", async () => {
@@ -231,7 +242,7 @@ describe("booking quote service", () => {
     ).rejects.toThrow("exceeds room capacity");
   });
 
-  it("prices and holds an inventory-tracked extra bed", async () => {
+  it("prices an inventory-tracked extra bed without holding it", async () => {
     mocks.select
       .mockReturnValueOnce(
         chain([
@@ -306,6 +317,6 @@ describe("booking quote service", () => {
       idempotencyKey: "quote-extra-bed",
     });
     expect(result.totalIdr).toBe(660000);
-    expect(mocks.insert).toHaveBeenCalledTimes(7);
+    expect(mocks.insert).toHaveBeenCalledTimes(4);
   });
 });

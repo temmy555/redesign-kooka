@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getActivePropertyId: vi.fn(),
   requirePermission: vi.fn(),
   getCommercialMasterOverview: vi.fn(),
+  applyTaxProfileToActiveRatePlans: vi.fn(),
   createTaxProfileDraft: vi.fn(),
   createPolicyDraft: vi.fn(),
   createPaymentInstructionDraft: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("../../src/modules/configuration/commercial-lifecycle", () => ({
 }));
 vi.mock("../../src/modules/configuration/commercial-master", () => ({
   getCommercialMasterOverview: mocks.getCommercialMasterOverview,
+  applyTaxProfileToActiveRatePlans: mocks.applyTaxProfileToActiveRatePlans,
   createTaxProfileDraft: mocks.createTaxProfileDraft,
   createPolicyDraft: mocks.createPolicyDraft,
   createPaymentInstructionDraft: mocks.createPaymentInstructionDraft,
@@ -146,6 +148,15 @@ describe("configuration admin routes", () => {
   });
 
   it.each([
+    [
+      "APPLY_TAX_TO_ACTIVE_ROOM_RATES",
+      {
+        action: "APPLY_TAX_TO_ACTIVE_ROOM_RATES",
+        taxProfileVersionId: U1,
+        reason: "Apply room tax to active rates",
+      },
+      "applyTaxProfileToActiveRatePlans",
+    ],
     [
       "CREATE_TAX_DRAFT",
       {
@@ -481,5 +492,46 @@ describe("configuration admin routes", () => {
     expect(responses.map((response) => response.status)).toEqual([
       400, 400, 400,
     ]);
+  });
+
+  it("rejects room type codes longer than the database column", async () => {
+    const response = await roomPost(
+      request("/api/staff/admin/room-master", {
+        action: "CREATE_ROOM_TYPE_DRAFT",
+        input: { ...roomTypeInput, code: "R".repeat(41) },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.createRoomTypeDraft).not.toHaveBeenCalled();
+  });
+
+  it("returns an actionable error when bank-data encryption is not configured", async () => {
+    mocks.createPaymentInstructionDraft.mockRejectedValueOnce(
+      new Error(
+        "DATA_ENCRYPTION_KEY is required before sensitive configuration can be saved",
+      ),
+    );
+    const response = await commercialPost(
+      request("/api/staff/admin/commercial-master", {
+        action: "CREATE_PAYMENT_INSTRUCTION_DRAFT",
+        code: "BANK_TRANSFER",
+        name: "Bank Transfer",
+        bankName: "BCA",
+        accountHolder: "KOOKA",
+        accountNumber: "1234567890",
+        instructionId: "Transfer lalu kirim bukti",
+        instructionEn: "Transfer and send proof",
+        effectiveFrom: date,
+        reason: "Initial instruction",
+      }),
+    );
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Konfigurasi keamanan data belum siap. Hubungi administrator.",
+      },
+    });
   });
 });

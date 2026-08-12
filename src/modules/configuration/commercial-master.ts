@@ -26,6 +26,7 @@ import { recordAuditEvent } from "../../platform/audit";
 import { requirePermission } from "../../platform/authorization";
 import { encryptSensitiveValue } from "../../platform/encryption";
 import { AppError } from "../../platform/errors";
+import { publishCommercialVersion } from "./commercial-lifecycle";
 import type { MutationResult, StaffSession } from "./contracts";
 import {
   assertEffectivePeriod,
@@ -163,6 +164,14 @@ export async function getCommercialMasterOverview(params: {
         templateReference: documentProfileVersions.templateReference,
         effectiveFrom: documentProfileVersions.effectiveFrom,
         effectiveTo: documentProfileVersions.effectiveTo,
+        effectiveNow: sql<boolean>`(
+          ${documentProfileVersions.lifecycleStatus} in ('ACTIVE', 'SCHEDULED')
+          and ${documentProfileVersions.effectiveFrom} <= now()
+          and (
+            ${documentProfileVersions.effectiveTo} is null
+            or ${documentProfileVersions.effectiveTo} > now()
+          )
+        )`,
       })
       .from(documentProfiles)
       .leftJoin(
@@ -367,11 +376,180 @@ export async function createTaxProfileDraft(params: {
     );
     return {
       id: created.id,
+      parentId: profileId,
       versionNumber,
       lifecycleStatus: "DRAFT",
       approvalStatus: "PENDING",
     };
   });
+}
+
+export async function applyTaxProfileToActiveRatePlans(params: {
+  session: StaffSession;
+  propertyId: string;
+  taxProfileVersionId: string;
+  reason: string;
+  now?: Date;
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "commercial.manage",
+  );
+  const reason = checkedReason(params.reason);
+  const now = params.now ?? new Date();
+  const db = getDatabase();
+  const [targetTax] = await db
+    .select({
+      profileId: taxProfiles.id,
+      domain: taxProfiles.domain,
+      lifecycleStatus: taxProfileVersions.lifecycleStatus,
+      effectiveFrom: taxProfileVersions.effectiveFrom,
+      effectiveTo: taxProfileVersions.effectiveTo,
+    })
+    .from(taxProfiles)
+    .innerJoin(
+      taxProfileVersions,
+      eq(taxProfileVersions.taxProfileId, taxProfiles.id),
+    )
+    .where(
+      and(
+        eq(taxProfiles.propertyId, params.propertyId),
+        eq(taxProfileVersions.id, params.taxProfileVersionId),
+      ),
+    )
+    .limit(1);
+  if (!targetTax) throw new AppError("NOT_FOUND", "Tax profile not found");
+  if (targetTax.domain !== "LODGING") {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Only a lodging tax profile can be applied to room rates",
+    );
+  }
+  if (
+    targetTax.lifecycleStatus !== "ACTIVE" ||
+    !isEffectiveAt(targetTax, now)
+  ) {
+    throw new AppError(
+      "CONFLICT",
+      "The lodging tax profile must be active before it can be applied",
+    );
+  }
+
+  const versions = await db
+    .select({
+      ratePlanId: ratePlans.id,
+      code: ratePlans.code,
+      versionId: ratePlanVersions.id,
+      lifecycleStatus: ratePlanVersions.lifecycleStatus,
+      approvalStatus: ratePlanVersions.approvalStatus,
+      nameId: ratePlanVersions.nameId,
+      nameEn: ratePlanVersions.nameEn,
+      sourceEligibility: ratePlanVersions.sourceEligibility,
+      paymentInstructionSetId: ratePlanVersions.paymentInstructionSetId,
+      cancellationPolicySetId: ratePlanVersions.cancellationPolicySetId,
+      taxProfileId: ratePlanVersions.taxProfileId,
+      effectiveFrom: ratePlanVersions.effectiveFrom,
+      effectiveTo: ratePlanVersions.effectiveTo,
+    })
+    .from(ratePlans)
+    .innerJoin(ratePlanVersions, eq(ratePlanVersions.ratePlanId, ratePlans.id))
+    .where(
+      and(
+        eq(ratePlans.propertyId, params.propertyId),
+        eq(ratePlans.status, "ACTIVE"),
+        eq(ratePlanVersions.lifecycleStatus, "ACTIVE"),
+      ),
+    )
+    .orderBy(ratePlans.code, desc(ratePlanVersions.effectiveFrom));
+  const seenRatePlans = new Set<string>();
+  const currentVersions = versions.filter((version) => {
+    if (seenRatePlans.has(version.ratePlanId) || !isEffectiveAt(version, now)) {
+      return false;
+    }
+    seenRatePlans.add(version.ratePlanId);
+    return true;
+  });
+  const candidates = currentVersions.filter(
+    (version) => version.taxProfileId !== targetTax.profileId,
+  );
+  const createdVersionIds: string[] = [];
+
+  for (const current of candidates) {
+    const rules = await db
+      .select()
+      .from(rateRules)
+      .where(eq(rateRules.ratePlanVersionId, current.versionId))
+      .orderBy(asc(rateRules.priority), asc(rateRules.id));
+    if (!rules.length) continue;
+    const overrides = await db
+      .select()
+      .from(rateRuleDates)
+      .where(
+        inArray(
+          rateRuleDates.rateRuleId,
+          rules.map((rule) => rule.id),
+        ),
+      )
+      .orderBy(asc(rateRuleDates.stayDate));
+    const overridesByRule = new Map<string, typeof overrides>();
+    for (const override of overrides) {
+      const existing = overridesByRule.get(override.rateRuleId) ?? [];
+      existing.push(override);
+      overridesByRule.set(override.rateRuleId, existing);
+    }
+    const draft = await createRatePlanDraft({
+      session: params.session,
+      propertyId: params.propertyId,
+      ratePlanId: current.ratePlanId,
+      code: current.code,
+      nameId: current.nameId,
+      nameEn: current.nameEn,
+      sourceEligibility: current.sourceEligibility,
+      paymentInstructionSetId: current.paymentInstructionSetId,
+      cancellationPolicySetId: current.cancellationPolicySetId,
+      taxProfileId: targetTax.profileId,
+      effectiveFrom: now,
+      effectiveTo: current.effectiveTo,
+      requiresApproval: false,
+      reason,
+      rules: rules.map((rule) => ({
+        roomTypeId: rule.roomTypeId,
+        name: rule.name,
+        ruleType: rule.ruleType as RateRuleInput["ruleType"],
+        priority: rule.priority,
+        startsOn: rule.startsOn,
+        endsOn: rule.endsOn,
+        weekdaysMask: rule.weekdaysMask,
+        nightlyRateIdr: rule.nightlyRateIdr,
+        minimumStay: rule.minimumStay,
+        maximumStay: rule.maximumStay,
+        closedToArrival: rule.closedToArrival,
+        closedToDeparture: rule.closedToDeparture,
+        dateOverrides: (overridesByRule.get(rule.id) ?? []).map((override) => ({
+          stayDate: override.stayDate,
+          nightlyRateIdr: override.nightlyRateIdr,
+          salesClosed: override.salesClosed,
+        })),
+      })),
+    });
+    await publishCommercialVersion({
+      session: params.session,
+      propertyId: params.propertyId,
+      subject: "RATE_PLAN",
+      versionId: draft.id,
+      reason,
+      now,
+    });
+    createdVersionIds.push(draft.id);
+  }
+
+  return {
+    taxProfileId: targetTax.profileId,
+    updatedRatePlans: createdVersionIds.length,
+    unchangedRatePlans: currentVersions.length - createdVersionIds.length,
+    createdVersionIds,
+  };
 }
 
 export async function createPolicyDraft(params: {
@@ -780,6 +958,7 @@ export async function createDocumentProfileDraft(params: {
     );
     return {
       id: created.id,
+      parentId: documentProfileId,
       versionNumber,
       lifecycleStatus: "DRAFT",
       approvalStatus: "PENDING",

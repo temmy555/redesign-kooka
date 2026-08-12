@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 
 import KookaLogo from "../../KookaLogo";
+import PaymentCountdown from "../PaymentCountdown";
 
 interface BookingDetail {
   bookingCode: string;
@@ -263,6 +264,12 @@ export default function BookingLookup({
       (payment) => payment.status === "PENDING_VERIFICATION",
     ),
   );
+  const paymentWindowOpen = Boolean(
+    booking &&
+    booking.reservationStatus === "ON_HOLD" &&
+    !paymentVerified &&
+    !paymentUnderReview,
+  );
   const presentation = booking
     ? statusPresentation(booking, locale, paymentVerified, paymentUnderReview)
     : null;
@@ -415,10 +422,25 @@ export default function BookingLookup({
                   </div>
                 </div>
               ) : (
-                <p>
-                  {locale === "id" ? "Batas pembayaran" : "Payment deadline"}:{" "}
-                  {dateTime(booking.paymentDeadlineAt, locale)} WIB
-                </p>
+                <>
+                  {paymentWindowOpen ? (
+                    <PaymentCountdown
+                      deadlineAt={booking.paymentDeadlineAt}
+                      locale={locale}
+                      onExpire={() =>
+                        setBooking((current) =>
+                          current?.reservationStatus === "ON_HOLD"
+                            ? { ...current, reservationStatus: "EXPIRED" }
+                            : current,
+                        )
+                      }
+                    />
+                  ) : null}
+                  <p>
+                    {locale === "id" ? "Batas pembayaran" : "Payment deadline"}:{" "}
+                    {dateTime(booking.paymentDeadlineAt, locale)} WIB
+                  </p>
+                </>
               )}
               {booking.payments.length ? (
                 <ul className="payment-history">
@@ -456,7 +478,7 @@ export default function BookingLookup({
                   </a>
                 ) : null}
               </article>
-            ) : paymentInstructions.length ? (
+            ) : paymentWindowOpen && paymentInstructions.length ? (
               <article className="lookup-bank">
                 <p className="eyebrow">
                   {locale === "id"

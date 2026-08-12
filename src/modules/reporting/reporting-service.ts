@@ -244,6 +244,7 @@ export async function getOperationalDashboard(params: {
     union all select 'outstanding_idr', coalesce(sum(case when fe.entry_type='DEBIT' then fe.total_amount_idr else -fe.total_amount_idr end),0)::text
       from folio_entries fe join folios f on f.id=fe.folio_id join reservations r on r.id=f.reservation_id
       where r.property_id=${params.propertyId} and f.status='OPEN'
+        and r.status not in ('CANCELLED','EXPIRED')
   `);
   const metrics = Object.fromEntries(
     metricResult.rows.map((row) => [row.metric, Number(row.value)]),

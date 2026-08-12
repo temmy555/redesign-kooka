@@ -1,10 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   DateField,
-  FileField,
+  MultiFileField,
   type SelectOption,
   KookaSelect,
   MoneyInput,
@@ -20,14 +21,17 @@ type JsonRecord = Record<string, unknown>;
 type Notice = { tone: "success" | "error"; message: string } | null;
 
 const areas = [
-  ["property", "Properti"],
+  ["setup", "Setup awal"],
+  ["property", "Properti & waktu"],
   ["rooms", "Kamar"],
-  ["commercial", "Harga & pajak"],
-  ["content", "Konten & menu"],
-  ["team", "Staf & audit"],
-  ["attendance", "Absensi"],
+  ["commercial", "Harga & pembayaran"],
+  ["content", "Landing & menu"],
+  ["team", "Staf"],
+  ["attendance", "Lokasi absensi"],
   ["reports", "Laporan"],
 ] as const;
+
+type AdminArea = (typeof areas)[number][0];
 
 const roleOptions: SelectOption[] = [
   { value: "", label: "Tanpa role awal" },
@@ -37,18 +41,63 @@ const roleOptions: SelectOption[] = [
   { value: "FNB", label: "F&B" },
 ] as SelectOption[];
 
+const standardRoomAmenities = [
+  {
+    code: "GARDEN_VIEW",
+    iconKey: "garden-view",
+    nameId: "Pemandangan taman",
+    nameEn: "Garden view",
+  },
+  {
+    code: "ELECTRIC_KETTLE",
+    iconKey: "electric-kettle",
+    nameId: "Ketel listrik",
+    nameEn: "Electric kettle",
+  },
+  {
+    code: "PRIVATE_BATHROOM",
+    iconKey: "private-bathroom",
+    nameId: "Kamar mandi pribadi",
+    nameEn: "Private bathroom",
+  },
+  {
+    code: "SHOWER",
+    iconKey: "shower",
+    nameId: "Shower",
+    nameEn: "Shower",
+  },
+  {
+    code: "AIR_CONDITIONING",
+    iconKey: "air-conditioning",
+    nameId: "AC",
+    nameEn: "Air conditioning",
+  },
+  {
+    code: "NO_SMOKING",
+    iconKey: "no-smoking",
+    nameId: "Dilarang merokok",
+    nameEn: "No smoking",
+  },
+] as const;
+
 function key(action: string) {
   return `${action}:${crypto.randomUUID()}`;
 }
 
-function internalCode(prefix: string) {
+function internalCode(prefix: string, maximumLength = 80) {
+  const suffix = crypto
+    .randomUUID()
+    .replaceAll("-", "")
+    .slice(0, 12)
+    .toUpperCase();
+  const prefixLimit = Math.max(1, maximumLength - suffix.length - 1);
   const normalized = prefix
     .normalize("NFKD")
     .replace(/[^a-zA-Z0-9]+/gu, "-")
     .replace(/^-+|-+$/gu, "")
     .toUpperCase()
-    .slice(0, 24);
-  return `${normalized || "ITEM"}-${crypto.randomUUID().toUpperCase()}`;
+    .slice(0, prefixLimit);
+  return `${normalized || "I"}-${suffix}`;
 }
 
 function messageFrom(value: unknown) {
@@ -96,6 +145,24 @@ function activeVersion(item: JsonRecord) {
   return ["ACTIVE", "SCHEDULED"].includes(String(item.lifecycleStatus));
 }
 
+export function effectiveVersion(item: JsonRecord, now = Date.now()) {
+  if (typeof item.effectiveNow === "boolean") return item.effectiveNow;
+  if (!activeVersion(item)) return false;
+  const effectiveFrom = new Date(String(item.effectiveFrom ?? "")).getTime();
+  if (!Number.isFinite(effectiveFrom) || effectiveFrom > now) return false;
+  if (item.effectiveTo === null || item.effectiveTo === undefined) return true;
+  const effectiveTo = new Date(String(item.effectiveTo)).getTime();
+  return Number.isFinite(effectiveTo) && effectiveTo > now;
+}
+
+function recordOf(value: unknown): JsonRecord {
+  return value && typeof value === "object" ? (value as JsonRecord) : {};
+}
+
+function rowsOf(value: unknown): JsonRecord[] {
+  return Array.isArray(value) ? (value as JsonRecord[]) : [];
+}
+
 function percent(value: unknown) {
   return `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(Number(value ?? 0) * 100)}%`;
 }
@@ -128,6 +195,21 @@ function scrollToForm(id: string) {
   }, 0);
 }
 
+function propertyConfigurationKey(value: unknown) {
+  if (!value || typeof value !== "object") return "property-loading";
+  const settings = (value as JsonRecord).settings;
+  if (!Array.isArray(settings)) return "property-loaded";
+  return settings
+    .map((setting) => {
+      if (!setting || typeof setting !== "object") return "";
+      const resolved = (setting as JsonRecord).resolved;
+      return resolved && typeof resolved === "object"
+        ? String((resolved as JsonRecord).versionId ?? "")
+        : "inactive";
+    })
+    .join("|");
+}
+
 export default function AdminWorkspace({
   permissions,
 }: {
@@ -135,6 +217,7 @@ export default function AdminWorkspace({
 }) {
   const granted = useMemo(() => new Set(permissions), [permissions]);
   const availableAreas = areas.filter(([area]) => {
+    if (area === "setup") return true;
     if (area === "property") return granted.has("configuration.view");
     if (area === "rooms") return granted.has("room_master.view");
     if (area === "commercial") return granted.has("commercial.view");
@@ -151,7 +234,9 @@ export default function AdminWorkspace({
       );
     return granted.has("report.view");
   });
-  const [active, setActive] = useState(availableAreas[0]?.[0] ?? "property");
+  const [active, setActive] = useState<AdminArea>(
+    availableAreas[0]?.[0] ?? "setup",
+  );
   const [data, setData] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<Notice>(null);
@@ -227,8 +312,6 @@ export default function AdminWorkspace({
           tone: "error",
           message: `Sebagian data administrasi gagal dimuat: ${failed.join("; ")}.`,
         });
-      } else {
-        setNotice(null);
       }
     } catch {
       setNotice({
@@ -280,9 +363,18 @@ export default function AdminWorkspace({
         ))}
       </nav>
       <StaffNotice notice={notice} onDismiss={() => setNotice(null)} />
+      {active === "setup" ? (
+        <SetupOverview
+          availableAreas={availableAreas.map(([area]) => area)}
+          data={data}
+          loading={loading}
+          onOpen={setActive}
+        />
+      ) : null}
       {active === "property" ? (
         <PropertyAdmin
           data={(data.property ?? {}) as JsonRecord}
+          key={propertyConfigurationKey(data.property)}
           load={load}
           setNotice={setNotice}
         />
@@ -297,6 +389,7 @@ export default function AdminWorkspace({
       {active === "commercial" ? (
         <CommercialAdmin
           data={(data.commercial ?? {}) as JsonRecord}
+          propertyData={(data.property ?? {}) as JsonRecord}
           roomData={(data.rooms ?? {}) as JsonRecord}
           load={load}
           setNotice={setNotice}
@@ -304,10 +397,13 @@ export default function AdminWorkspace({
       ) : null}
       {active === "content" ? (
         <ContentAdmin
+          commercial={data.commercial}
           content={data.content}
           media={data.media}
           menu={data.menu}
+          rooms={data.rooms}
           canManageMedia={granted.has("cms.media.manage")}
+          canPublishMedia={granted.has("cms.media.publish")}
           canManageMenu={granted.has("commercial.manage")}
           load={load}
           setNotice={setNotice}
@@ -333,6 +429,342 @@ export default function AdminWorkspace({
   );
 }
 
+type SetupStep = {
+  area: Exclude<AdminArea, "setup">;
+  title: string;
+  description: string;
+  level: "WAJIB" | "DISARANKAN" | "OPSIONAL" | "SIAP";
+  done: boolean;
+  checks: Array<{ label: string; done: boolean }>;
+};
+
+function SetupOverview({
+  availableAreas,
+  data,
+  loading,
+  onOpen,
+}: {
+  availableAreas: AdminArea[];
+  data: Record<string, unknown>;
+  loading: boolean;
+  onOpen: (area: AdminArea) => void;
+}) {
+  const propertyData = recordOf(data.property);
+  const property = recordOf(propertyData.property);
+  const settings = rowsOf(propertyData.settings);
+  const hasActiveSetting = (code: string) =>
+    settings.some(
+      (setting) =>
+        String(setting.code) === code &&
+        Boolean(setting.resolved) &&
+        typeof setting.resolved === "object",
+    );
+  const propertyProfileReady = Boolean(property.name && property.address);
+  const stayTimingReady = hasActiveSetting("STAY_TIMING");
+  const paymentDeadlineReady = hasActiveSetting("BOOKING_PAYMENT");
+
+  const roomData = recordOf(data.rooms);
+  const activeRoomTypes = latestBy(
+    rowsOf(roomData.roomTypes),
+    "roomTypeId",
+  ).filter(activeVersion);
+  const activeRoomUnits = rowsOf(roomData.roomUnits).filter(
+    (room) =>
+      String(room.status ?? "ACTIVE") === "ACTIVE" && Boolean(room.roomTypeId),
+  );
+
+  const commercialData = recordOf(data.commercial);
+  const activeRates = latestBy(
+    rowsOf(commercialData.ratePlans),
+    "ratePlanId",
+  ).filter(activeVersion);
+  const activeInstructions = latestBy(
+    rowsOf(commercialData.paymentInstructions),
+    "instructionSetId",
+  ).filter(activeVersion);
+  const activeDocumentProfiles = rowsOf(commercialData.documents).filter(
+    effectiveVersion,
+  );
+  const activeTaxes = latestBy(
+    rowsOf(commercialData.taxes),
+    "profileId",
+  ).filter(activeVersion);
+  const lodgingTaxes = activeTaxes.filter(
+    (tax) => String(tax.domain) === "LODGING",
+  );
+  const ratesWithoutTaxDecision = activeRates.filter(
+    (rate) =>
+      !lodgingTaxes.some(
+        (tax) => String(tax.profileId) === String(rate.taxProfileId ?? ""),
+      ),
+  );
+  const explicitlyUntaxedRates = activeRates.filter((rate) =>
+    lodgingTaxes.some(
+      (tax) =>
+        String(tax.profileId) === String(rate.taxProfileId ?? "") &&
+        Boolean(tax.noTax),
+    ),
+  );
+  const activeRateVersionIds = new Set(
+    activeRates.map((rate) => String(rate.versionId)),
+  );
+  const pricedRoomTypeIds = new Set(
+    rowsOf(commercialData.rateRules)
+      .filter((rule) =>
+        activeRateVersionIds.has(String(rule.ratePlanVersionId)),
+      )
+      .map((rule) => String(rule.roomTypeId)),
+  );
+  const allRoomTypesPriced =
+    activeRoomTypes.length > 0 &&
+    activeRoomTypes.every((roomType) =>
+      pricedRoomTypeIds.has(String(roomType.roomTypeId)),
+    );
+
+  const contentReady =
+    rowsOf(data.media).length > 0 ||
+    rowsOf(data.content).length > 0 ||
+    rowsOf(data.menu).length > 0;
+  const teamData = recordOf(data.team);
+  const team = rowsOf(teamData.team);
+  const roleCodes = new Set(
+    rowsOf(teamData.grants).map((grant) => String(grant.roleCode)),
+  );
+  const frontOfficeReady = roleCodes.has("FRONT_OFFICE");
+  const attendanceLocations = rowsOf(recordOf(data.attendance).locations);
+  const attendanceReady = attendanceLocations.some(
+    (location) => String(location.status) === "ACTIVE",
+  );
+
+  const steps: SetupStep[] = [
+    {
+      area: "property",
+      title: "Properti dan waktu operasional",
+      description:
+        "Isi identitas properti, jam check-in/checkout, dan batas pembayaran online.",
+      level: "WAJIB",
+      done: propertyProfileReady && stayTimingReady && paymentDeadlineReady,
+      checks: [
+        { label: "Profil dan alamat", done: propertyProfileReady },
+        { label: "Jam menginap", done: stayTimingReady },
+        { label: "Batas pembayaran", done: paymentDeadlineReady },
+      ],
+    },
+    {
+      area: "rooms",
+      title: "Jenis dan nomor kamar",
+      description:
+        "Buat jenis kamar yang dipilih tamu, lalu hubungkan nomor kamar fisik.",
+      level: "WAJIB",
+      done: activeRoomTypes.length > 0 && activeRoomUnits.length > 0,
+      checks: [
+        {
+          label: `${activeRoomTypes.length} jenis aktif`,
+          done: activeRoomTypes.length > 0,
+        },
+        {
+          label: `${activeRoomUnits.length} kamar siap`,
+          done: activeRoomUnits.length > 0,
+        },
+      ],
+    },
+    {
+      area: "commercial",
+      title: "Harga dan pembayaran",
+      description:
+        "Pasang harga, tentukan pajak, aktifkan rekening transfer, dan siapkan profil dokumen.",
+      level: "WAJIB",
+      done:
+        allRoomTypesPriced &&
+        activeInstructions.length > 0 &&
+        activeRates.length > 0 &&
+        ratesWithoutTaxDecision.length === 0 &&
+        activeDocumentProfiles.length > 0,
+      checks: [
+        {
+          label: "Semua jenis kamar memiliki harga",
+          done: allRoomTypesPriced,
+        },
+        {
+          label: `${activeInstructions.length} rekening transfer aktif`,
+          done: activeInstructions.length > 0,
+        },
+        {
+          label: !activeRates.length
+            ? "Status pajak diperiksa setelah harga dibuat"
+            : ratesWithoutTaxDecision.length
+              ? `${ratesWithoutTaxDecision.length} harga belum menentukan pajak`
+              : explicitlyUntaxedRates.length
+                ? `${explicitlyUntaxedRates.length} harga ditetapkan tanpa pajak`
+                : "Semua harga memakai pajak",
+          done: activeRates.length > 0 && !ratesWithoutTaxDecision.length,
+        },
+        {
+          label: activeDocumentProfiles.length
+            ? "Profil invoice dan kuitansi aktif"
+            : "Profil invoice dan kuitansi belum aktif",
+          done: activeDocumentProfiles.length > 0,
+        },
+      ],
+    },
+    {
+      area: "content",
+      title: "Landing page dan menu",
+      description:
+        "Tambahkan foto properti, konten landing, serta katalog makanan bila diperlukan.",
+      level: "DISARANKAN",
+      done: contentReady,
+      checks: [
+        {
+          label: "Konten, foto, atau menu sudah tersedia",
+          done: contentReady,
+        },
+      ],
+    },
+    {
+      area: "team",
+      title: "Akun dan role staf",
+      description:
+        "Buat akun individual dan pilih role agar setiap staf hanya melihat tugasnya.",
+      level: "DISARANKAN",
+      done: team.length > 0 && frontOfficeReady,
+      checks: [
+        { label: `${team.length} akun staf`, done: team.length > 0 },
+        { label: "Front Office tersedia", done: frontOfficeReady },
+      ],
+    },
+    {
+      area: "attendance",
+      title: "Titik absensi",
+      description:
+        "Tentukan lokasi dan radius absensi jika fitur attendance akan digunakan.",
+      level: "OPSIONAL",
+      done: attendanceReady,
+      checks: [{ label: "Minimal satu titik aktif", done: attendanceReady }],
+    },
+    {
+      area: "reports",
+      title: "Laporan",
+      description:
+        "Tidak memerlukan setup. Laporan terisi otomatis setelah operasional berjalan.",
+      level: "SIAP",
+      done: true,
+      checks: [{ label: "Tidak perlu konfigurasi", done: true }],
+    },
+  ];
+  const visibleSteps = steps.filter((step) =>
+    availableAreas.includes(step.area),
+  );
+  const requiredSteps = visibleSteps.filter((step) => step.level === "WAJIB");
+  const completedRequired = requiredSteps.filter((step) => step.done).length;
+  const nextStep =
+    requiredSteps.find((step) => !step.done) ??
+    visibleSteps.find((step) => !step.done && step.level !== "OPSIONAL");
+  const progress = requiredSteps.length
+    ? Math.round((completedRequired / requiredSteps.length) * 100)
+    : 100;
+
+  return (
+    <div className={styles.setupWorkspace}>
+      <section className={styles.setupHero}>
+        <div>
+          <span className={styles.pageEyebrow}>Panduan setup</span>
+          <h2>Siapkan sistem sesuai urutan</h2>
+          <p>
+            Selesaikan tiga tahap wajib agar pencarian kamar, booking online,
+            pembayaran, dan penerbitan dokumen dapat berjalan.
+          </p>
+        </div>
+        <div className={styles.setupProgressSummary}>
+          <strong>{loading ? "…" : `${progress}%`}</strong>
+          <span>
+            {loading
+              ? "Memeriksa data"
+              : `${completedRequired} dari ${requiredSteps.length} tahap wajib selesai`}
+          </span>
+          <div
+            aria-label={`Progres setup ${progress}%`}
+            className={styles.setupProgressTrack}
+          >
+            <i style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+      </section>
+      <section className={styles.setupSteps}>
+        {visibleSteps.map((step, index) => (
+          <article
+            className={`${styles.setupStepCard} ${step.done ? styles.setupStepDone : ""}`}
+            key={step.area}
+          >
+            <div className={styles.setupStepNumber}>{index + 1}</div>
+            <div className={styles.setupStepBody}>
+              <div className={styles.setupStepHeading}>
+                <div>
+                  <span>{step.level}</span>
+                  <h3>{step.title}</h3>
+                </div>
+                <span
+                  className={`${styles.setupStatus} ${step.done ? styles.setupStatusDone : ""}`}
+                >
+                  {loading
+                    ? "Memeriksa"
+                    : step.done
+                      ? "Siap"
+                      : step.level === "OPSIONAL"
+                        ? "Belum diatur"
+                        : "Perlu dilengkapi"}
+                </span>
+              </div>
+              <p>{step.description}</p>
+              <div className={styles.setupChecks}>
+                {step.checks.map((check) => (
+                  <span key={check.label}>
+                    <i className={check.done ? styles.checkDone : ""} />
+                    {check.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              className={
+                step.done ? styles.secondaryButton : styles.primaryButton
+              }
+              onClick={() => onOpen(step.area)}
+              type="button"
+            >
+              {step.done ? "Lihat" : "Atur sekarang"}
+            </button>
+          </article>
+        ))}
+      </section>
+      {nextStep ? (
+        <section className={styles.setupNextAction}>
+          <div>
+            <span>Langkah berikutnya</span>
+            <strong>{nextStep.title}</strong>
+          </div>
+          <button
+            className={styles.primaryButton}
+            onClick={() => onOpen(nextStep.area)}
+            type="button"
+          >
+            Lanjutkan setup
+          </button>
+        </section>
+      ) : (
+        <section
+          className={`${styles.setupNextAction} ${styles.setupComplete}`}
+        >
+          <div>
+            <span>Setup utama selesai</span>
+            <strong>Alur booking hingga penerbitan dokumen sudah siap.</strong>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function PropertyAdmin({ data, load, setNotice }: AdminProps) {
   const property = (data.property ?? {}) as JsonRecord;
   const settings = Array.isArray(data.settings)
@@ -343,24 +775,62 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
   const [timezone, setTimezone] = useState(
     String(property.timezone ?? "Asia/Jakarta"),
   );
-  const [locale, setLocale] = useState(String(property.defaultLocale ?? "id"));
+  const [locale, setLocale] = useState(String(property.defaultLocale ?? "en"));
   const [reason, setReason] = useState("");
-  const [checkInTime, setCheckInTime] = useState("14:00");
-  const [checkoutTime, setCheckoutTime] = useState("12:00");
-  const [onlineDeadline, setOnlineDeadline] = useState("60");
-  const [sameDayDeadline, setSameDayDeadline] = useState("60");
-  const [extraBedRate, setExtraBedRate] = useState("");
+  const settingByCode = (code: string) =>
+    settings.find((setting) => String(setting.code) === code);
+  const staySetting = settingByCode("STAY_TIMING");
+  const paymentSetting = settingByCode("BOOKING_PAYMENT");
+  const extraBedSetting = settingByCode("EXTRA_BED_PRICING");
+  const valuesOf = (setting: JsonRecord | undefined) => {
+    const resolved = setting?.resolved;
+    if (!resolved || typeof resolved !== "object") return {} as JsonRecord;
+    const values = (resolved as JsonRecord).values;
+    return values && typeof values === "object"
+      ? (values as JsonRecord)
+      : ({} as JsonRecord);
+  };
+  const stayValues = valuesOf(staySetting);
+  const paymentValues = valuesOf(paymentSetting);
+  const extraBedValues = valuesOf(extraBedSetting);
+  const activeCheckIn = String(stayValues.checkInTime ?? "14:00");
+  const activeCheckout = String(stayValues.checkoutTime ?? "12:00");
+  const activeOnlineDeadline = String(
+    paymentValues.onlineDeadlineMinutes ?? "60",
+  );
+  const activeSameDayDeadline = String(
+    paymentValues.sameDayDeadlineMinutes ?? "60",
+  );
+  const activeExtraBedRate =
+    extraBedValues.nightlyRateIdr === undefined
+      ? ""
+      : String(extraBedValues.nightlyRateIdr);
+  const activeSettingCount = settings.filter(
+    (setting) => setting.resolved && typeof setting.resolved === "object",
+  ).length;
+  const versionCount = settings.reduce(
+    (total, setting) =>
+      total + (Array.isArray(setting.versions) ? setting.versions.length : 0),
+    0,
+  );
+  const [checkInTime, setCheckInTime] = useState(activeCheckIn);
+  const [checkoutTime, setCheckoutTime] = useState(activeCheckout);
+  const [onlineDeadline, setOnlineDeadline] = useState(activeOnlineDeadline);
+  const [sameDayDeadline, setSameDayDeadline] = useState(activeSameDayDeadline);
+  const [extraBedRate, setExtraBedRate] = useState(activeExtraBedRate);
   const [settingReason, setSettingReason] = useState("");
   async function save(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        reason.trim() || "Profil properti diperbarui oleh Owner";
       await post("/api/staff/admin/configuration", {
         action: "UPDATE_PROPERTY_PROFILE",
         name,
         address: address || null,
         timezone,
         defaultLocale: locale,
-        reason,
+        reason: auditReason,
       });
       setNotice({
         tone: "success",
@@ -376,6 +846,8 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
   }
   async function saveOperationalSettings(event: React.FormEvent) {
     event.preventDefault();
+    const auditReason =
+      settingReason.trim() || "Pengaturan operasional diperbarui oleh Owner";
     const definitions = [
       {
         code: "STAY_TIMING",
@@ -423,14 +895,14 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
             ...definition,
             effectiveFrom: new Date().toISOString(),
             effectiveTo: null,
-            reason: settingReason,
+            reason: auditReason,
             requiresApproval: false,
           },
         });
         await post("/api/staff/admin/configuration", {
           action: "PUBLISH_SETTING",
           versionId: String(draft.id),
-          reason: settingReason,
+          reason: auditReason,
         });
       }
       setSettingReason("");
@@ -474,10 +946,13 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
           <div className={styles.formGrid}>
             <label>
               Zona waktu
-              <input
-                required
+              <KookaSelect
+                ariaLabel="Zona waktu properti"
                 value={timezone}
-                onChange={(event) => setTimezone(event.target.value)}
+                onChange={setTimezone}
+                options={[
+                  { value: "Asia/Jakarta", label: "WIB (Asia/Jakarta)" },
+                ]}
               />
             </label>
             <label>
@@ -494,10 +969,8 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
             </label>
           </div>
           <label>
-            Alasan perubahan
+            Catatan perubahan (opsional)
             <textarea
-              required
-              minLength={3}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />
@@ -568,11 +1041,9 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
             />
           </label>
           <label>
-            Alasan
+            Catatan perubahan (opsional)
             <textarea
-              minLength={3}
               onChange={(event) => setSettingReason(event.target.value)}
-              required
               value={settingReason}
             />
           </label>
@@ -581,24 +1052,75 @@ function PropertyAdmin({ data, load, setNotice }: AdminProps) {
           </button>
         </form>
       </section>
-      <section className={styles.panel}>
+      <section className={`${styles.panel} ${styles.actionGridWide}`}>
         <div className={styles.panelHeader}>
-          <h2>Konfigurasi berversi</h2>
-          <span className={styles.countPill}>{settings.length}</span>
+          <div>
+            <h2>Pengaturan aktif</h2>
+            <p className={styles.panelSubtitle}>
+              Ringkasan nilai yang sedang digunakan oleh sistem.
+            </p>
+          </div>
+          <span className={styles.countPill}>{activeSettingCount} aktif</span>
         </div>
-        <div className={styles.masterList}>
-          {settings.map((setting) => (
-            <article key={String(setting.id)}>
-              <div>
-                <strong>{String(setting.name)}</strong>
-                <small>{String(setting.code)}</small>
-              </div>
-              <span className={styles.statusPill}>
-                {setting.resolved ? "aktif" : "belum aktif"}
-              </span>
-            </article>
-          ))}
+        <div className={styles.settingsSummaryGrid}>
+          <article className={styles.settingSummaryCard}>
+            <span>Waktu menginap</span>
+            <strong>
+              {`${activeCheckIn.replace(":", ".")} — ${activeCheckout.replace(":", ".")}`}
+            </strong>
+            <small>
+              {`Check-in dan checkout standar${!staySetting?.resolved ? " · belum disimpan" : ""}`}
+            </small>
+          </article>
+          <article className={styles.settingSummaryCard}>
+            <span>Pembayaran online</span>
+            <strong>{activeOnlineDeadline} menit</strong>
+            <small>
+              {`Same-day ${activeSameDayDeadline} menit${!paymentSetting?.resolved ? " · belum disimpan" : ""}`}
+            </small>
+          </article>
+          <article className={styles.settingSummaryCard}>
+            <span>Extra bed / malam</span>
+            <strong>
+              {activeExtraBedRate ? idr(activeExtraBedRate) : "Belum diatur"}
+            </strong>
+            <small>
+              {extraBedSetting?.resolved
+                ? "Harga aktif saat ini"
+                : "Isi harga pada formulir jika sudah tersedia"}
+            </small>
+          </article>
         </div>
+        {settings.length > 0 ? (
+          <details className={styles.settingsHistory}>
+            <summary>Riwayat perubahan ({versionCount})</summary>
+            <div className={styles.masterList}>
+              {settings.map((setting) => {
+                const resolved =
+                  setting.resolved && typeof setting.resolved === "object"
+                    ? (setting.resolved as JsonRecord)
+                    : null;
+                return (
+                  <article key={String(setting.id)}>
+                    <div>
+                      <strong>{String(setting.name)}</strong>
+                      <small>
+                        {Array.isArray(setting.versions)
+                          ? `${setting.versions.length} perubahan tersimpan`
+                          : "Belum ada perubahan"}
+                      </small>
+                    </div>
+                    <span className={styles.statusPill}>
+                      {resolved
+                        ? `versi ${String(resolved.versionNumber)}`
+                        : "belum aktif"}
+                    </span>
+                  </article>
+                );
+              })}
+            </div>
+          </details>
+        ) : null}
       </section>
     </div>
   );
@@ -663,6 +1185,8 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
   async function createUnit(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        unitReason.trim() || `Kamar ${roomNumber} ditambahkan oleh Owner`;
       await post("/api/staff/admin/room-master", {
         action: "CREATE_ROOM_UNIT",
         roomNumber,
@@ -670,7 +1194,7 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
         floorOrArea: floor || null,
         roomTypeId,
         effectiveFrom: new Date().toISOString(),
-        reason: unitReason,
+        reason: auditReason,
       });
       setNotice({
         tone: "success",
@@ -691,12 +1215,14 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
   async function changeUnitType(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        changeUnitReason.trim() || "Jenis kamar fisik diperbarui oleh Owner";
       await post("/api/staff/admin/room-master", {
         action: "CHANGE_ROOM_UNIT_TYPE",
         roomUnitId: changeUnitId,
         roomTypeId: changeUnitTypeId,
         effectiveFrom: new Date().toISOString(),
-        reason: changeUnitReason,
+        reason: auditReason,
       });
       setChangeUnitId("");
       setChangeUnitTypeId("");
@@ -714,14 +1240,18 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
   async function createResource(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        resourceReason.trim() || "Persediaan tambahan dibuat oleh Owner";
       await post("/api/staff/admin/room-master", {
         action: "CREATE_RESOURCE_POOL",
-        code: resourceCode,
+        code:
+          resourceCode.trim() ||
+          internalCode(resourceNameEn || resourceNameId, 64),
         nameId: resourceNameId,
         nameEn: resourceNameEn,
         physicalCapacity: Number(resourceCapacity),
         inventoryTracked: resourceTracked,
-        reason: resourceReason,
+        reason: auditReason,
       });
       setResourceCode("");
       setResourceNameId("");
@@ -744,12 +1274,15 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
   async function createAmenity(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        amenityReason.trim() || "Fasilitas kamar dibuat oleh Owner";
       await post("/api/staff/admin/room-master", {
         action: "CREATE_AMENITY",
-        code: amenityCode,
+        code:
+          amenityCode.trim() || internalCode(amenityNameEn || amenityNameId),
         nameId: amenityNameId,
         nameEn: amenityNameEn,
-        reason: amenityReason,
+        reason: auditReason,
       });
       setAmenityCode("");
       setAmenityNameId("");
@@ -778,6 +1311,47 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
     (item, index, list) =>
       list.findIndex((other) => other.id === item.id) === index,
   );
+
+  async function applyStandardAmenities() {
+    try {
+      const selectedIds: string[] = [];
+      for (const preset of standardRoomAmenities) {
+        const existing = amenityMasters.find(
+          (amenity) => String(amenity.code) === preset.code,
+        );
+        if (existing) {
+          selectedIds.push(String(existing.id));
+          continue;
+        }
+        const created = await post("/api/staff/admin/room-master", {
+          action: "CREATE_AMENITY",
+          code: preset.code,
+          iconKey: preset.iconKey,
+          nameId: preset.nameId,
+          nameEn: preset.nameEn,
+          reason: "Menyiapkan fasilitas standar kamar",
+        });
+        selectedIds.push(String(created.id));
+      }
+      setSelectedAmenityIds((current) => [
+        ...new Set([...current, ...selectedIds]),
+      ]);
+      setNotice({
+        tone: "success",
+        message:
+          "Enam fasilitas standar sudah dipilih. Simpan jenis kamar untuk menampilkannya di landing page.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Fasilitas standar gagal disiapkan.",
+      });
+    }
+  }
 
   function resetRoomTypeForm() {
     setEditingRoomTypeId("");
@@ -824,11 +1398,16 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
   async function saveRoomType(event: React.FormEvent) {
     event.preventDefault();
     try {
+      const auditReason =
+        typeReason.trim() ||
+        `${editingRoomTypeId ? "Jenis kamar diperbarui" : "Jenis kamar ditambahkan"} oleh Owner`;
+      const resolvedTypeCode =
+        typeCode.trim() || internalCode(typeNameEn || typeNameId, 40);
       const draft = await post("/api/staff/admin/room-master", {
         action: "CREATE_ROOM_TYPE_DRAFT",
         input: {
           roomTypeId: editingRoomTypeId || undefined,
-          code: typeCode,
+          code: resolvedTypeCode,
           nameId: typeNameId,
           nameEn: typeNameEn,
           descriptionId: typeDescriptionId || null,
@@ -846,13 +1425,13 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
           amenityIds: selectedAmenityIds,
           effectiveFrom: new Date().toISOString(),
           effectiveTo: null,
-          reason: typeReason,
+          reason: auditReason,
         },
       });
       await post("/api/staff/admin/room-master", {
         action: "PUBLISH_ROOM_TYPE",
         versionId: String(draft.id),
-        reason: typeReason,
+        reason: auditReason,
       });
       setNotice({
         tone: "success",
@@ -897,7 +1476,9 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
   }
   return (
     <div className={styles.actionGrid}>
-      <section className={`${styles.formCard} ${styles.actionGridWide}`}>
+      <section
+        className={`${styles.formCard} ${styles.actionGridWide} ${styles.setupOrderOne}`}
+      >
         <div className={styles.panelHeader}>
           <div>
             <h2>
@@ -920,19 +1501,6 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
         </div>
         <form className={styles.staffForm} onSubmit={saveRoomType}>
           <div className={styles.formGrid}>
-            <label>
-              Kode jenis kamar
-              <input
-                disabled={Boolean(editingRoomTypeId)}
-                maxLength={80}
-                placeholder="CONTOH: FAMILY"
-                required
-                value={typeCode}
-                onChange={(event) =>
-                  setTypeCode(event.target.value.toUpperCase())
-                }
-              />
-            </label>
             <label>
               Konfigurasi tempat tidur
               <input
@@ -973,6 +1541,11 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
               />
             </label>
           </div>
+          {!editingRoomTypeId ? (
+            <p className={styles.formHint}>
+              Kode internal jenis kamar dibuat otomatis oleh sistem.
+            </p>
+          ) : null}
           <div className={styles.formGrid}>
             <label>
               Kapasitas standar dewasa
@@ -1056,7 +1629,23 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
             </div>
           ) : null}
           <fieldset className={styles.fieldGroup}>
-            <legend>Amenity jenis kamar</legend>
+            <legend>Fasilitas kamar</legend>
+            <div className={styles.amenityQuickSetup}>
+              <div>
+                <strong>Fasilitas umum kamar</strong>
+                <small>
+                  Garden view, electric kettle, private bathroom, shower, AC,
+                  dan no smoking.
+                </small>
+              </div>
+              <button
+                className={styles.secondaryButton}
+                onClick={() => void applyStandardAmenities()}
+                type="button"
+              >
+                Gunakan 6 fasilitas standar
+              </button>
+            </div>
             {amenityMasters.length ? (
               <div className={styles.formGrid}>
                 {amenityMasters.map((amenity) => {
@@ -1081,15 +1670,14 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
               </div>
             ) : (
               <p className={styles.formHint}>
-                Tambahkan amenity terlebih dahulu bila diperlukan.
+                Klik tombol fasilitas standar atau tambahkan fasilitas khusus
+                melalui formulir di bawah.
               </p>
             )}
           </fieldset>
           <label>
-            Alasan pencatatan / perubahan
+            Catatan perubahan (opsional)
             <textarea
-              minLength={3}
-              required
               value={typeReason}
               onChange={(event) => setTypeReason(event.target.value)}
             />
@@ -1101,7 +1689,9 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
           </button>
         </form>
       </section>
-      <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
+      <section
+        className={`${styles.panel} ${styles.menuCatalogPanel} ${styles.setupOrderTwo}`}
+      >
         <div className={styles.panelHeader}>
           <h2>Daftar jenis kamar</h2>
           <span className={styles.countPill}>
@@ -1124,7 +1714,6 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
                 <tr key={String(item.roomTypeId)}>
                   <td>
                     <strong>{String(item.nameId ?? item.code)}</strong>
-                    <small>{String(item.code)}</small>
                   </td>
                   <td>
                     {String(item.standardAdults ?? 0)} standar · maks.{" "}
@@ -1173,7 +1762,7 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
           </table>
         </div>
       </section>
-      <section className={styles.formCard}>
+      <section className={`${styles.formCard} ${styles.setupOrderThree}`}>
         <div className={styles.panelHeader}>
           <h2>Tambah nomor kamar</h2>
         </div>
@@ -1206,7 +1795,6 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
                 options={activeTypes.map((item) => ({
                   value: String(item.roomTypeId),
                   label: String(item.nameId ?? item.code),
-                  description: String(item.code),
                 }))}
                 placeholder="Pilih tipe"
               />
@@ -1220,10 +1808,8 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
             </label>
           </div>
           <label>
-            Alasan
+            Catatan (opsional)
             <textarea
-              required
-              minLength={3}
               value={unitReason}
               onChange={(event) => setUnitReason(event.target.value)}
             />
@@ -1231,9 +1817,10 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
           <button className={styles.primaryButton}>Tambah kamar</button>
         </form>
       </section>
-      <section className={styles.formCard}>
+      <section className={`${styles.formCard} ${styles.setupAdvancedCard}`}>
         <div className={styles.panelHeader}>
-          <h2>Ubah jenis unit kamar</h2>
+          <h2>Ubah jenis kamar fisik</h2>
+          <span className={styles.countPill}>Opsional</span>
         </div>
         <form className={styles.staffForm} onSubmit={changeUnitType}>
           <label>
@@ -1259,39 +1846,27 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
               options={activeTypes.map((item) => ({
                 value: String(item.roomTypeId),
                 label: String(item.nameId ?? item.code),
-                description: String(item.code),
               }))}
               placeholder="Pilih jenis kamar"
             />
           </label>
           <label>
-            Alasan
+            Catatan (opsional)
             <textarea
-              minLength={3}
               onChange={(event) => setChangeUnitReason(event.target.value)}
-              required
               value={changeUnitReason}
             />
           </label>
           <button className={styles.primaryButton}>Ubah jenis unit</button>
         </form>
       </section>
-      <section className={styles.formCard}>
+      <section className={`${styles.formCard} ${styles.setupAdvancedCard}`}>
         <div className={styles.panelHeader}>
-          <h2>Resource inventory</h2>
+          <h2>Persediaan tambahan</h2>
+          <span className={styles.countPill}>Opsional</span>
         </div>
         <form className={styles.staffForm} onSubmit={createResource}>
           <div className={styles.formGrid}>
-            <label>
-              Kode
-              <input
-                onChange={(event) =>
-                  setResourceCode(event.target.value.toUpperCase())
-                }
-                required
-                value={resourceCode}
-              />
-            </label>
             <label>
               Kapasitas fisik
               <input
@@ -1319,42 +1894,34 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
               />
             </label>
           </div>
+          <p className={styles.formHint}>
+            Kode internal persediaan dibuat otomatis oleh sistem.
+          </p>
           <label className={styles.checkboxLabel}>
             <input
               checked={resourceTracked}
               onChange={(event) => setResourceTracked(event.target.checked)}
               type="checkbox"
             />
-            Pantau kapasitas resource ini
+            Pantau jumlah persediaan ini
           </label>
           <label>
-            Alasan
+            Catatan (opsional)
             <textarea
-              minLength={3}
               onChange={(event) => setResourceReason(event.target.value)}
-              required
               value={resourceReason}
             />
           </label>
-          <button className={styles.primaryButton}>Tambah resource</button>
+          <button className={styles.primaryButton}>Tambah persediaan</button>
         </form>
       </section>
-      <section className={styles.formCard}>
+      <section className={`${styles.formCard} ${styles.setupAdvancedCard}`}>
         <div className={styles.panelHeader}>
-          <h2>Tambah amenity</h2>
+          <h2>Tambah fasilitas kamar</h2>
+          <span className={styles.countPill}>Opsional</span>
         </div>
         <form className={styles.staffForm} onSubmit={createAmenity}>
           <div className={styles.formGrid}>
-            <label>
-              Kode
-              <input
-                required
-                value={amenityCode}
-                onChange={(event) =>
-                  setAmenityCode(event.target.value.toUpperCase())
-                }
-              />
-            </label>
             <label>
               Nama Indonesia
               <input
@@ -1372,21 +1939,24 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
               />
             </label>
           </div>
+          <p className={styles.formHint}>
+            Kode internal fasilitas dibuat otomatis oleh sistem.
+          </p>
           <label>
-            Alasan
+            Catatan (opsional)
             <textarea
-              required
-              minLength={3}
               value={amenityReason}
               onChange={(event) => setAmenityReason(event.target.value)}
             />
           </label>
-          <button className={styles.primaryButton}>Tambah amenity</button>
+          <button className={styles.primaryButton}>Tambah fasilitas</button>
         </form>
       </section>
-      <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
+      <section
+        className={`${styles.panel} ${styles.menuCatalogPanel} ${styles.setupOrderFour}`}
+      >
         <div className={styles.panelHeader}>
-          <h2>Master kamar</h2>
+          <h2>Daftar kamar fisik</h2>
           <span className={styles.countPill}>
             {roomUnits.length} unit · {amenityMasters.length} amenity ·{" "}
             {resourcePools.length} resource
@@ -1444,10 +2014,12 @@ function RoomAdmin({ data, load, setNotice }: AdminProps) {
 
 function CommercialAdmin({
   data,
+  propertyData,
   roomData,
   load,
   setNotice,
-}: AdminProps & { roomData: JsonRecord }) {
+}: AdminProps & { propertyData: JsonRecord; roomData: JsonRecord }) {
+  const property = recordOf(propertyData.property);
   const taxes = Array.isArray(data.taxes) ? (data.taxes as JsonRecord[]) : [];
   const rates = Array.isArray(data.ratePlans)
     ? (data.ratePlans as JsonRecord[])
@@ -1461,6 +2033,9 @@ function CommercialAdmin({
   const instructions = Array.isArray(data.paymentInstructions)
     ? (data.paymentInstructions as JsonRecord[])
     : [];
+  const documents = Array.isArray(data.documents)
+    ? (data.documents as JsonRecord[])
+    : [];
   const rateRules = Array.isArray(data.rateRules)
     ? (data.rateRules as JsonRecord[])
     : [];
@@ -1473,6 +2048,8 @@ function CommercialAdmin({
   const activeRates = latestRates.filter(activeVersion);
   const activePolicies = latestPolicies.filter(activeVersion);
   const activeInstructions = latestInstructions.filter(activeVersion);
+  const activeDocuments = documents.filter(effectiveVersion);
+  const activeDocument = activeDocuments[0];
   const roomTypes = Array.isArray(roomData.roomTypes)
     ? (roomData.roomTypes as JsonRecord[]).filter(
         (item, index, list) =>
@@ -1481,11 +2058,41 @@ function CommercialAdmin({
             index,
       )
     : [];
+  const activeRateVersionIds = new Set(
+    activeRates.map((rate) => String(rate.versionId)),
+  );
+  const pricedRoomTypeIds = new Set(
+    rateRules
+      .filter((rule) =>
+        activeRateVersionIds.has(String(rule.ratePlanVersionId)),
+      )
+      .map((rule) => String(rule.roomTypeId)),
+  );
+  const missingPriceRoomTypes = roomTypes.filter(
+    (roomType) => !pricedRoomTypeIds.has(String(roomType.roomTypeId)),
+  );
   const lodgingTaxes = activeTaxes.filter((item) => item.domain === "LODGING");
+  const initialLodgingTaxProfileId =
+    lodgingTaxes.length === 1 ? String(lodgingTaxes[0]?.profileId ?? "") : "";
+  const roomRatesWithoutTaxDecision = activeRates.filter((rate) => {
+    const linkedTax = lodgingTaxes.find(
+      (tax) => String(tax.profileId) === String(rate.taxProfileId ?? ""),
+    );
+    return !linkedTax;
+  });
+  const explicitlyUntaxedRoomRates = activeRates.filter((rate) =>
+    lodgingTaxes.some(
+      (tax) =>
+        String(tax.profileId) === String(rate.taxProfileId ?? "") &&
+        Boolean(tax.noTax),
+    ),
+  );
   const [domain, setDomain] = useState("LODGING");
   const [taxRate, setTaxRate] = useState("0");
   const [serviceRate, setServiceRate] = useState("0");
   const [noTax, setNoTax] = useState(true);
+  const [taxPriceMode, setTaxPriceMode] = useState("EXCLUSIVE");
+  const [applyTaxToActiveRates, setApplyTaxToActiveRates] = useState(true);
   const [reason, setReason] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [displayRate, setDisplayRate] = useState("");
@@ -1494,7 +2101,9 @@ function CommercialAdmin({
   const [planRoomTypeId, setPlanRoomTypeId] = useState("");
   const [nightlyRate, setNightlyRate] = useState("");
   const [minimumStay, setMinimumStay] = useState("1");
-  const [selectedTaxProfileId, setSelectedTaxProfileId] = useState("");
+  const [selectedTaxProfileId, setSelectedTaxProfileId] = useState(
+    initialLodgingTaxProfileId,
+  );
   const [selectedCancellationPolicySetId, setSelectedCancellationPolicySetId] =
     useState("");
   const [showRateOptions, setShowRateOptions] = useState(false);
@@ -1516,16 +2125,46 @@ function CommercialAdmin({
   const [policyContentId, setPolicyContentId] = useState("");
   const [policyContentEn, setPolicyContentEn] = useState("");
   const [policyReason, setPolicyReason] = useState("");
+  const [documentLegalName, setDocumentLegalName] = useState(() =>
+    String(activeDocument?.legalName ?? property.name ?? ""),
+  );
+  const [documentDisplayName, setDocumentDisplayName] = useState(() =>
+    String(activeDocument?.displayName ?? property.name ?? ""),
+  );
+  const [documentAddress, setDocumentAddress] = useState(() =>
+    String(activeDocument?.address ?? property.address ?? ""),
+  );
+  const [documentContact, setDocumentContact] = useState(() =>
+    String(activeDocument?.contact ?? ""),
+  );
+  const [documentReason, setDocumentReason] = useState("");
   const [editingTaxProfileId, setEditingTaxProfileId] = useState("");
   const [editingRatePlanId, setEditingRatePlanId] = useState("");
   const [editingInstructionSetId, setEditingInstructionSetId] = useState("");
   const [editingPolicySetId, setEditingPolicySetId] = useState("");
+  const [editingDocumentProfileId, setEditingDocumentProfileId] = useState(
+    String(activeDocument?.profileId ?? ""),
+  );
   const [retireTarget, setRetireTarget] = useState<{
-    subject: "TAX_PROFILE" | "RATE_PLAN" | "PAYMENT_INSTRUCTION" | "POLICY";
+    subject:
+      | "TAX_PROFILE"
+      | "RATE_PLAN"
+      | "PAYMENT_INSTRUCTION"
+      | "POLICY"
+      | "DOCUMENT_PROFILE";
     versionId: string;
     label: string;
   } | null>(null);
   const [retireReason, setRetireReason] = useState("");
+  function taxDescription(item: JsonRecord | undefined) {
+    if (!item || item.noTax) return "Tanpa pajak";
+    const mode =
+      item.taxInclusive && item.serviceChargeInclusive
+        ? "sudah termasuk harga"
+        : "ditambahkan ke harga";
+    return `Pajak ${percent(item.taxRate)} · layanan ${percent(item.serviceChargeRate)} · ${mode}`;
+  }
+
   async function createTax(event: React.FormEvent) {
     event.preventDefault();
     try {
@@ -1545,8 +2184,8 @@ function CommercialAdmin({
         domain,
         taxRate: noTax ? "0" : String(Number(taxRate) / 100),
         serviceChargeRate: noTax ? "0" : String(Number(serviceRate) / 100),
-        taxInclusive: false,
-        serviceChargeInclusive: false,
+        taxInclusive: !noTax && taxPriceMode === "INCLUSIVE",
+        serviceChargeInclusive: !noTax && taxPriceMode === "INCLUSIVE",
         noTax,
         effectiveFrom: new Date().toISOString(),
         reason: auditReason,
@@ -1564,15 +2203,34 @@ function CommercialAdmin({
         versionId: String(draft.id),
         reason: auditReason,
       });
+      let updatedRatePlans = 0;
+      if (domain === "LODGING" && applyTaxToActiveRates) {
+        const applied = await post("/api/staff/admin/commercial-master", {
+          action: "APPLY_TAX_TO_ACTIVE_ROOM_RATES",
+          taxProfileVersionId: String(draft.id),
+          reason: `${auditReason}; diterapkan ke harga kamar aktif`,
+        });
+        updatedRatePlans = Number(applied.updatedRatePlans ?? 0);
+      }
+      if (domain === "LODGING") {
+        setSelectedTaxProfileId(String(draft.parentId ?? ""));
+      }
       setTaxRate("0");
       setServiceRate("0");
+      setTaxPriceMode("EXCLUSIVE");
       setReason("");
       setEditingTaxProfileId("");
       setNotice({
         tone: "success",
-        message: editingTaxProfileId
-          ? "Pengaturan pajak diperbarui dan versi barunya sudah aktif."
-          : "Konfigurasi pajak dibuat, disetujui, dan diaktifkan.",
+        message: `${
+          editingTaxProfileId
+            ? "Pengaturan pajak diperbarui dan versi barunya sudah aktif."
+            : "Konfigurasi pajak dibuat, disetujui, dan diaktifkan."
+        }${
+          domain === "LODGING" && applyTaxToActiveRates
+            ? ` ${updatedRatePlans} harga kamar diperbarui.`
+            : ""
+        }`,
       });
       await load();
     } catch (error) {
@@ -1635,7 +2293,6 @@ function CommercialAdmin({
       setPlanNameId("Harga Standar");
       setPlanNameEn("Standard Rate");
       setPlanRoomTypeId("");
-      setSelectedTaxProfileId("");
       setSelectedCancellationPolicySetId("");
       setNightlyRate("");
       setRateReason("");
@@ -1792,12 +2449,74 @@ function CommercialAdmin({
     }
   }
 
+  async function createDocumentProfile(event: React.FormEvent) {
+    event.preventDefault();
+    try {
+      const auditReason =
+        documentReason.trim() ||
+        "Profil invoice dan kuitansi dikonfigurasi oleh Owner";
+      const draft = await post("/api/staff/admin/commercial-master", {
+        action: "CREATE_DOCUMENT_PROFILE_DRAFT",
+        documentProfileId: editingDocumentProfileId || undefined,
+        code: internalCode("DOCUMENT-KOOKA"),
+        legalName: documentLegalName,
+        displayName: documentDisplayName,
+        address: documentAddress,
+        contact: documentContact || null,
+        taxIdentity: null,
+        logoFileId: null,
+        footerId: "Terima kasih telah memilih KOOKA Residence Surabaya.",
+        footerEn: "Thank you for choosing KOOKA Residence Surabaya.",
+        templateReference: "kooka-a5-v1",
+        effectiveFrom: new Date().toISOString(),
+        reason: auditReason,
+      });
+      await post("/api/staff/admin/commercial-master", {
+        action: "REVIEW_VERSION",
+        subject: "DOCUMENT_PROFILE",
+        versionId: String(draft.id),
+        decision: "APPROVE",
+        reason: auditReason,
+      });
+      await post("/api/staff/admin/commercial-master", {
+        action: "PUBLISH_VERSION",
+        subject: "DOCUMENT_PROFILE",
+        versionId: String(draft.id),
+        reason: auditReason,
+      });
+      setDocumentReason("");
+      setEditingDocumentProfileId(
+        String(draft.parentId ?? editingDocumentProfileId),
+      );
+      setNotice({
+        tone: "success",
+        message: editingDocumentProfileId
+          ? "Profil invoice dan kuitansi diperbarui dan sudah aktif."
+          : "Profil invoice dan kuitansi dibuat dan langsung aktif.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Profil dokumen gagal disimpan.",
+      });
+    }
+  }
+
   function editTax(item: JsonRecord) {
     setEditingTaxProfileId(String(item.profileId));
     setDomain(String(item.domain ?? "LODGING"));
     setNoTax(Boolean(item.noTax));
     setTaxRate(String(Number(item.taxRate ?? 0) * 100));
     setServiceRate(String(Number(item.serviceChargeRate ?? 0) * 100));
+    setTaxPriceMode(
+      item.taxInclusive && item.serviceChargeInclusive
+        ? "INCLUSIVE"
+        : "EXCLUSIVE",
+    );
     setReason("");
     scrollToForm("tax-settings-form");
   }
@@ -1847,6 +2566,16 @@ function CommercialAdmin({
     scrollToForm("policy-settings-form");
   }
 
+  function editDocumentProfile(item: JsonRecord) {
+    setEditingDocumentProfileId(String(item.profileId));
+    setDocumentLegalName(String(item.legalName ?? property.name ?? ""));
+    setDocumentDisplayName(String(item.displayName ?? property.name ?? ""));
+    setDocumentAddress(String(item.address ?? property.address ?? ""));
+    setDocumentContact(String(item.contact ?? ""));
+    setDocumentReason("");
+    scrollToForm("document-profile-form");
+  }
+
   async function retireVersion() {
     if (!retireTarget) return;
     try {
@@ -1893,13 +2622,73 @@ function CommercialAdmin({
 
   return (
     <div className={styles.actionGrid}>
-      <section className={styles.formCard} id="tax-settings-form">
+      <section
+        className={`${styles.setupInlineGuide} ${styles.actionGridWide}`}
+      >
+        <div>
+          <span className={styles.pageEyebrow}>Agar booking online aktif</span>
+          <h2>Lengkapi harga, pembayaran, dan dokumen</h2>
+          <p>
+            Harga, status pajak, rekening transfer, dan profil dokumen wajib
+            disiapkan agar alur booking sampai penerbitan invoice berjalan.
+          </p>
+        </div>
+        <div className={styles.setupInlineChecks}>
+          <span>
+            <i className={roomTypes.length ? styles.checkDone : ""} />
+            {roomTypes.length} jenis kamar
+          </span>
+          <span>
+            <i
+              className={
+                !missingPriceRoomTypes.length && roomTypes.length
+                  ? styles.checkDone
+                  : ""
+              }
+            />
+            {missingPriceRoomTypes.length
+              ? `${missingPriceRoomTypes.length} jenis belum memiliki harga`
+              : "Semua jenis memiliki harga"}
+          </span>
+          <span>
+            <i className={activeInstructions.length ? styles.checkDone : ""} />
+            {activeInstructions.length} rekening aktif
+          </span>
+          <span>
+            <i className={activeDocuments.length ? styles.checkDone : ""} />
+            {activeDocuments.length
+              ? "Profil invoice dan kuitansi aktif"
+              : "Profil invoice dan kuitansi belum aktif"}
+          </span>
+          <span>
+            <i
+              className={
+                activeRates.length && !roomRatesWithoutTaxDecision.length
+                  ? styles.checkDone
+                  : ""
+              }
+            />
+            {!activeRates.length
+              ? "Belum ada harga untuk diperiksa pajaknya"
+              : roomRatesWithoutTaxDecision.length
+                ? `${roomRatesWithoutTaxDecision.length} harga belum menentukan pajak`
+                : explicitlyUntaxedRoomRates.length
+                  ? `${explicitlyUntaxedRoomRates.length} harga ditetapkan tanpa pajak`
+                  : "Semua harga memakai pajak"}
+          </span>
+        </div>
+      </section>
+      <section
+        className={`${styles.formCard} ${styles.setupOrderTwo}`}
+        id="tax-settings-form"
+      >
         <div className={styles.panelHeader}>
           <h2>
             {editingTaxProfileId
               ? "Edit pajak & biaya layanan"
               : "Pajak & biaya layanan"}
           </h2>
+          <span className={styles.countPill}>Opsional</span>
           {editingTaxProfileId ? (
             <button
               className={styles.textButton}
@@ -1967,9 +2756,43 @@ function CommercialAdmin({
                     onChange={(event) => setServiceRate(event.target.value)}
                   />
                 </label>
+                <label>
+                  Harga yang dimasukkan
+                  <KookaSelect
+                    ariaLabel="Cara pajak diterapkan pada harga"
+                    value={taxPriceMode}
+                    onChange={setTaxPriceMode}
+                    options={[
+                      {
+                        value: "EXCLUSIVE",
+                        label: "Belum termasuk pajak",
+                        description:
+                          "Pajak dan biaya layanan ditambahkan ke harga kamar.",
+                      },
+                      {
+                        value: "INCLUSIVE",
+                        label: "Sudah termasuk pajak",
+                        description:
+                          "Total kamar tetap; pajak dipisahkan dari harga tersebut.",
+                      },
+                    ]}
+                  />
+                </label>
               </>
             ) : null}
           </div>
+          {domain === "LODGING" ? (
+            <label className={styles.checkboxLabel}>
+              <input
+                checked={applyTaxToActiveRates}
+                onChange={(event) =>
+                  setApplyTaxToActiveRates(event.target.checked)
+                }
+                type="checkbox"
+              />
+              Terapkan pengaturan ini ke seluruh harga kamar aktif
+            </label>
+          ) : null}
           <label>
             Catatan internal (opsional)
             <textarea
@@ -1985,7 +2808,10 @@ function CommercialAdmin({
           </button>
         </form>
       </section>
-      <section className={styles.formCard} id="bank-settings-form">
+      <section
+        className={`${styles.formCard} ${styles.setupOrderTwo}`}
+        id="bank-settings-form"
+      >
         <div className={styles.panelHeader}>
           <h2>
             {editingInstructionSetId
@@ -2053,7 +2879,77 @@ function CommercialAdmin({
         </form>
       </section>
       <section
-        className={`${styles.formCard} ${styles.actionGridWide}`}
+        className={`${styles.formCard} ${styles.setupOrderTwo}`}
+        id="document-profile-form"
+      >
+        <div className={styles.panelHeader}>
+          <div>
+            <h2>
+              {editingDocumentProfileId
+                ? "Edit profil invoice & kuitansi"
+                : "Profil invoice & kuitansi"}
+            </h2>
+            <p className={styles.formHint}>
+              Wajib agar invoice, kuitansi, proforma, dan refund note dapat
+              diterbitkan.
+            </p>
+          </div>
+          <span className={styles.countPill}>
+            {activeDocuments.length ? "Aktif" : "Wajib"}
+          </span>
+        </div>
+        <form className={styles.staffForm} onSubmit={createDocumentProfile}>
+          <div className={styles.formGrid}>
+            <label>
+              Nama resmi properti
+              <input
+                onChange={(event) => setDocumentLegalName(event.target.value)}
+                required
+                value={documentLegalName}
+              />
+            </label>
+            <label>
+              Nama yang tampil di dokumen
+              <input
+                onChange={(event) => setDocumentDisplayName(event.target.value)}
+                required
+                value={documentDisplayName}
+              />
+            </label>
+          </div>
+          <label>
+            Alamat pada dokumen
+            <textarea
+              onChange={(event) => setDocumentAddress(event.target.value)}
+              required
+              value={documentAddress}
+            />
+          </label>
+          <label>
+            Kontak pada dokumen (opsional)
+            <input
+              onChange={(event) => setDocumentContact(event.target.value)}
+              placeholder="Nomor WhatsApp dan/atau email"
+              value={documentContact}
+            />
+          </label>
+          <label>
+            Catatan internal (opsional)
+            <textarea
+              onChange={(event) => setDocumentReason(event.target.value)}
+              placeholder="Contoh: identitas dokumen utama KOOKA"
+              value={documentReason}
+            />
+          </label>
+          <button className={styles.primaryButton}>
+            {editingDocumentProfileId
+              ? "Simpan perubahan profil dokumen"
+              : "Simpan & aktifkan profil dokumen"}
+          </button>
+        </form>
+      </section>
+      <section
+        className={`${styles.formCard} ${styles.actionGridWide} ${styles.setupAdvancedCard}`}
         id="policy-settings-form"
       >
         <div className={styles.panelHeader}>
@@ -2062,6 +2958,7 @@ function CommercialAdmin({
               ? "Edit kebijakan pembatalan & refund"
               : "Kebijakan pembatalan & refund"}
           </h2>
+          <span className={styles.countPill}>Opsional</span>
           {editingPolicySetId ? (
             <button
               className={styles.textButton}
@@ -2125,7 +3022,7 @@ function CommercialAdmin({
         </form>
       </section>
       <section
-        className={`${styles.formCard} ${styles.actionGridWide}`}
+        className={`${styles.formCard} ${styles.actionGridWide} ${styles.setupOrderOne}`}
         id="rate-settings-form"
       >
         <div className={styles.panelHeader}>
@@ -2187,6 +3084,27 @@ function CommercialAdmin({
           </div>
           <div className={styles.formGrid}>
             <label>
+              Pajak untuk harga ini
+              <KookaSelect
+                ariaLabel="Pajak untuk harga kamar"
+                onChange={setSelectedTaxProfileId}
+                options={[
+                  {
+                    value: "",
+                    label: "Belum ditentukan",
+                    description:
+                      "Pajak tidak dihitung sampai profil pajak dipilih.",
+                  },
+                  ...lodgingTaxes.map((item) => ({
+                    value: String(item.profileId),
+                    label: String(item.name ?? "Pengaturan pajak kamar"),
+                    description: taxDescription(item),
+                  })),
+                ]}
+                value={selectedTaxProfileId}
+              />
+            </label>
+            <label>
               Kebijakan pembatalan (opsional)
               <KookaSelect
                 ariaLabel="Kebijakan pembatalan harga kamar"
@@ -2201,6 +3119,28 @@ function CommercialAdmin({
                 value={selectedCancellationPolicySetId}
               />
             </label>
+          </div>
+          <div
+            className={`${styles.taxStatusCard} ${
+              selectedTaxProfileId
+                ? styles.taxStatusConfigured
+                : styles.taxStatusWarning
+            }`}
+          >
+            <strong>
+              {selectedTaxProfileId
+                ? "Status pajak harga kamar sudah ditentukan"
+                : "Status pajak harga kamar belum ditentukan"}
+            </strong>
+            <span>
+              {selectedTaxProfileId
+                ? taxDescription(
+                    lodgingTaxes.find(
+                      (item) => String(item.profileId) === selectedTaxProfileId,
+                    ),
+                  )
+                : "Booking dari harga ini belum akan menghitung pajak."}
+            </span>
           </div>
           <p className={styles.formHint}>
             Semua rekening transfer yang aktif berlaku untuk seluruh harga kamar
@@ -2217,24 +3157,6 @@ function CommercialAdmin({
           </button>
           {showRateOptions ? (
             <div className={styles.formGrid}>
-              <label>
-                Pajak untuk harga ini
-                <KookaSelect
-                  ariaLabel="Pajak untuk harga kamar"
-                  onChange={setSelectedTaxProfileId}
-                  options={[
-                    { value: "", label: "Tanpa pajak" },
-                    ...lodgingTaxes.map((item) => ({
-                      value: String(item.profileId),
-                      label: String(item.name ?? "Pengaturan pajak kamar"),
-                      description: item.noTax
-                        ? "Tanpa pajak"
-                        : `Pajak ${Number(item.taxRate ?? 0) * 100}% · layanan ${Number(item.serviceChargeRate ?? 0) * 100}%`,
-                    })),
-                  ]}
-                  value={selectedTaxProfileId}
-                />
-              </label>
               <label>
                 Minimum menginap (malam)
                 <input
@@ -2279,9 +3201,13 @@ function CommercialAdmin({
           </button>
         </form>
       </section>
-      <section className={styles.formCard} id="currency-settings-form">
+      <section
+        className={`${styles.formCard} ${styles.setupAdvancedCard}`}
+        id="currency-settings-form"
+      >
         <div className={styles.panelHeader}>
           <h2>Kurs tampilan</h2>
+          <span className={styles.countPill}>Opsional</span>
         </div>
         <form className={styles.staffForm} onSubmit={createRate}>
           <div className={styles.formGrid}>
@@ -2314,13 +3240,16 @@ function CommercialAdmin({
           <button className={styles.primaryButton}>Simpan kurs tampilan</button>
         </form>
       </section>
-      <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
+      <section
+        className={`${styles.panel} ${styles.menuCatalogPanel} ${styles.setupOrderThree}`}
+      >
         <div className={styles.panelHeader}>
           <h2>Pengaturan yang aktif</h2>
           <span className={styles.countPill}>
             {activeTaxes.length} pajak · {activeRates.length} harga ·{" "}
-            {activeInstructions.length} rekening · {activePolicies.length}{" "}
-            kebijakan · {latestExchange.length} kurs
+            {activeInstructions.length} rekening · {activeDocuments.length}{" "}
+            profil dokumen · {activePolicies.length} kebijakan ·{" "}
+            {latestExchange.length} kurs
           </span>
         </div>
         <div className={styles.menuCatalogGroups}>
@@ -2416,9 +3345,18 @@ function CommercialAdmin({
                         {roomTypeName(rule?.roomTypeId)} ·{" "}
                         {idr(rule?.nightlyRateIdr)} / malam · minimum{" "}
                         {String(rule?.minimumStay ?? 1)} malam
+                      </small>
+                      <small
+                        className={
+                          linkedTax && !linkedTax.noTax
+                            ? styles.configurationReady
+                            : styles.configurationWarning
+                        }
+                      >
+                        Pajak:{" "}
                         {linkedTax
-                          ? ` · ${String(linkedTax.name)}`
-                          : " · tanpa pajak"}
+                          ? taxDescription(linkedTax)
+                          : "Belum ditentukan"}
                       </small>
                       <small>
                         Berlaku {dateLabel(rule?.startsOn)} –{" "}
@@ -2509,6 +3447,63 @@ function CommercialAdmin({
               {!activeInstructions.length ? (
                 <p className={styles.emptyCompact}>
                   Belum ada rekening transfer yang aktif.
+                </p>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.commercialGroup}>
+            <div className={styles.commercialGroupHeader}>
+              <h3>Profil invoice &amp; kuitansi</h3>
+              <small>{activeDocuments.length} profil berlaku</small>
+            </div>
+            <div className={styles.masterList}>
+              {activeDocuments.map((document) => (
+                <article key={String(document.versionId)}>
+                  <div>
+                    <strong>
+                      {String(document.displayName ?? "Profil dokumen")}
+                    </strong>
+                    <small>{String(document.legalName ?? "—")}</small>
+                    <small>
+                      {String(document.address ?? "Alamat belum tersedia")}
+                    </small>
+                    {document.contact ? (
+                      <small>{String(document.contact)}</small>
+                    ) : null}
+                  </div>
+                  <div className={styles.commercialActions}>
+                    <span className={styles.statusPill}>
+                      {statusLabel(document)}
+                    </span>
+                    <button
+                      className={styles.secondaryButton}
+                      onClick={() => editDocumentProfile(document)}
+                      type="button"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className={styles.dangerButton}
+                      onClick={() =>
+                        setRetireTarget({
+                          subject: "DOCUMENT_PROFILE",
+                          versionId: String(document.versionId),
+                          label: String(
+                            document.displayName ?? "Profil dokumen",
+                          ),
+                        })
+                      }
+                      type="button"
+                    >
+                      Nonaktifkan
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {!activeDocuments.length ? (
+                <p className={styles.emptyCompact}>
+                  Belum ada profil invoice dan kuitansi yang aktif.
                 </p>
               ) : null}
             </div>
@@ -2620,28 +3615,44 @@ function CommercialAdmin({
 }
 
 function ContentAdmin({
+  commercial,
   content,
   media,
   menu,
+  rooms,
   canManageMedia,
+  canPublishMedia,
   canManageMenu,
   load,
   setNotice,
 }: {
+  commercial: unknown;
   content: unknown;
   media: unknown;
   menu: unknown;
+  rooms: unknown;
   canManageMedia: boolean;
+  canPublishMedia: boolean;
   canManageMenu: boolean;
   load: () => Promise<void>;
   setNotice: (notice: Notice) => void;
 }) {
   const pages = Array.isArray(content) ? (content as JsonRecord[]) : [];
   const assets = Array.isArray(media) ? (media as JsonRecord[]) : [];
+  const roomData = recordOf(rooms);
+  const activeRoomTypes = latestBy(
+    rowsOf(roomData.roomTypes),
+    "roomTypeId",
+  ).filter(activeVersion);
   const menuRows = useMemo(
     () => (Array.isArray(menu) ? (menu as JsonRecord[]) : []),
     [menu],
   );
+  const commercialData = recordOf(commercial);
+  const activeFnbTaxes = latestBy(
+    rowsOf(commercialData.taxes),
+    "profileId",
+  ).filter((tax) => activeVersion(tax) && String(tax.domain) === "FNB");
   const today = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -2753,14 +3764,19 @@ function ContentAdmin({
   }, [menuRows]);
   const menuCategoryOptions = menuCatalog.map((category) => ({
     value: category.categoryId,
-    label: `${category.categoryNameId || category.categoryCode} (${category.categoryCode})`,
+    label: category.categoryNameId || category.categoryCode,
   }));
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
   const [altId, setAltId] = useState("");
   const [altEn, setAltEn] = useState("");
-  const [rights, setRights] = useState("");
-  const [categoryCode, setCategoryCode] = useState("");
+  const [rights, setRights] = useState("Foto milik KOOKA Residence");
+  const [selectedUploadRoomTypeId, setSelectedUploadRoomTypeId] = useState("");
+  const [selectedGalleryRoomTypeId, setSelectedGalleryRoomTypeId] =
+    useState("");
+  const [selectedGalleryAssetIds, setSelectedGalleryAssetIds] = useState<
+    string[]
+  >([]);
   const [nameId, setNameId] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
@@ -2779,6 +3795,60 @@ function ContentAdmin({
   const [newItemTaxProfileId, setNewItemTaxProfileId] = useState("");
   const [newItemReason, setNewItemReason] = useState("Tambah item menu");
   const [newItemEffectiveFrom, setNewItemEffectiveFrom] = useState(today);
+  const autoGeneratedCategoryCode = useMemo(() => {
+    const nameSeed = (nameId || "KATEGORI")
+      .normalize("NFKD")
+      .replace(/[^a-zA-Z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .toUpperCase()
+      .slice(0, 24);
+    const matchingCodes = menuCatalog
+      .map((category) => category.categoryCode)
+      .filter((code) => code.startsWith(`${nameSeed}-`))
+      .map((code) => Number(code.slice(nameSeed.length + 1)))
+      .filter((value) => Number.isInteger(value) && value > 0);
+    const nextSequence = Math.max(0, ...matchingCodes) + 1;
+    return `${nameSeed}-${String(nextSequence).padStart(2, "0")}`;
+  }, [menuCatalog, nameId]);
+
+  function roomGalleryAssetIds(roomTypeId: string) {
+    if (!roomTypeId) return [];
+    return [
+      ...new Set(
+        assets
+          .filter(
+            (asset) =>
+              String(asset.status) === "PUBLISHED" &&
+              String(asset.scanStatus) === "CLEAN" &&
+              Boolean(asset.authenticPropertyMedia),
+          )
+          .flatMap((asset) => {
+            const usages = Array.isArray(asset.usages)
+              ? (asset.usages as JsonRecord[])
+              : [];
+            return usages
+              .filter(
+                (usage) =>
+                  String(usage.targetId) === roomTypeId &&
+                  ["ROOM_TYPE_HERO", "ROOM_TYPE_GALLERY"].includes(
+                    String(usage.usageType),
+                  ),
+              )
+              .map((usage) => ({
+                assetId: String(asset.id),
+                order: Number(usage.sortOrder ?? 0),
+              }));
+          })
+          .sort((left, right) => left.order - right.order)
+          .map((item) => item.assetId),
+      ),
+    ];
+  }
+
+  function selectGalleryRoomType(roomTypeId: string) {
+    setSelectedGalleryRoomTypeId(roomTypeId);
+    setSelectedGalleryAssetIds(roomGalleryAssetIds(roomTypeId));
+  }
 
   const [lifecycleRequest, setLifecycleRequest] = useState<{
     endpoint: string;
@@ -2824,25 +3894,102 @@ function ContentAdmin({
       });
       return;
     }
-    if (!file) return;
-    try {
-      const form = new FormData();
-      form.set("file", file);
-      form.set("title", title);
-      form.set("altId", altId);
-      form.set("altEn", altEn);
-      form.set("rightsSource", rights);
-      form.set("authenticPropertyMedia", "true");
-      const response = await fetch("/api/staff/admin/media", {
-        method: "POST",
-        body: form,
+    if (!selectedUploadRoomTypeId) {
+      setNotice({
+        tone: "error",
+        message: "Pilih jenis kamar tujuan sebelum mengunggah foto.",
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(messageFrom(result));
+      return;
+    }
+    if (!canPublishMedia) {
+      setNotice({
+        tone: "error",
+        message:
+          "Akun ini belum memiliki izin publikasi media untuk menambahkan foto langsung ke kamar.",
+      });
+      return;
+    }
+    if (!files.length) {
+      setNotice({ tone: "error", message: "Pilih minimal satu foto kamar." });
+      return;
+    }
+    try {
+      const uploadedAssetIds: string[] = [];
+      for (const [index, file] of files.entries()) {
+        const form = new FormData();
+        form.set("file", file);
+        form.set(
+          "title",
+          files.length > 1
+            ? `${title.trim() || "Foto kamar"} ${index + 1}`
+            : title,
+        );
+        form.set(
+          "altId",
+          files.length > 1 ? `${altId} - foto ${index + 1}` : altId,
+        );
+        form.set(
+          "altEn",
+          files.length > 1 ? `${altEn} - photo ${index + 1}` : altEn,
+        );
+        form.set("rightsSource", rights);
+        form.set("authenticPropertyMedia", "true");
+        const response = await fetch("/api/staff/admin/media", {
+          method: "POST",
+          body: form,
+        });
+        const result: unknown = await response.json();
+        if (!response.ok) throw new Error(messageFrom(result));
+        const uploadResult = recordOf(result);
+        if (String(uploadResult.scanStatus) !== "CLEAN") {
+          throw new Error(
+            `Foto ${file.name} belum lolos pemeriksaan file dan belum dapat dipublikasikan.`,
+          );
+        }
+        const assetId = String(uploadResult.id ?? "");
+        if (!assetId) throw new Error("ID foto hasil upload tidak ditemukan.");
+        await post(
+          "/api/staff/admin/media",
+          {
+            action: "PUBLISH",
+            assetId,
+            reason: "Foto kamar diunggah dan dipublikasikan oleh pengelola",
+          },
+          "PATCH",
+        );
+        uploadedAssetIds.push(assetId);
+      }
+      const existingAssetIds = roomGalleryAssetIds(selectedUploadRoomTypeId);
+      const galleryAssetIds = [
+        ...new Set([...existingAssetIds, ...uploadedAssetIds]),
+      ];
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "SET_ROOM_GALLERY",
+          roomTypeId: selectedUploadRoomTypeId,
+          assetIds: galleryAssetIds,
+        },
+        "PATCH",
+      );
+      const roomTypeName = String(
+        activeRoomTypes.find(
+          (roomType) =>
+            String(roomType.roomTypeId) === selectedUploadRoomTypeId,
+        )?.nameId ?? "jenis kamar",
+      );
       setNotice({
         tone: "success",
-        message: "Foto asli masuk staging media dan menunggu scan/publish.",
+        message: `${files.length} foto berhasil ditambahkan ke ${roomTypeName}.`,
       });
+      setSelectedGalleryRoomTypeId(selectedUploadRoomTypeId);
+      setSelectedGalleryAssetIds(galleryAssetIds);
+      setSelectedUploadRoomTypeId("");
+      setFiles([]);
+      setTitle("");
+      setAltId("");
+      setAltEn("");
+      setRights("Foto milik KOOKA Residence");
       await load();
     } catch (error) {
       setNotice({
@@ -2850,6 +3997,72 @@ function ContentAdmin({
         message: error instanceof Error ? error.message : "Upload gagal.",
       });
     }
+  }
+
+  async function publishMedia(assetId: string) {
+    try {
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "PUBLISH",
+          assetId,
+          reason: "Foto asli properti siap ditampilkan",
+        },
+        "PATCH",
+      );
+      setNotice({ tone: "success", message: "Foto berhasil dipublikasikan." });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Foto gagal dipublikasikan.",
+      });
+    }
+  }
+
+  async function saveRoomGallery() {
+    if (!selectedGalleryRoomTypeId || !selectedGalleryAssetIds.length) {
+      setNotice({
+        tone: "error",
+        message: "Pilih jenis kamar dan minimal satu foto.",
+      });
+      return;
+    }
+    try {
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "SET_ROOM_GALLERY",
+          roomTypeId: selectedGalleryRoomTypeId,
+          assetIds: selectedGalleryAssetIds,
+        },
+        "PATCH",
+      );
+      setNotice({
+        tone: "success",
+        message:
+          "Galeri kamar tersimpan. Foto pertama menjadi foto utama kamar.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Galeri gagal disimpan.",
+      });
+    }
+  }
+
+  function moveGalleryAsset(assetId: string, direction: -1 | 1) {
+    setSelectedGalleryAssetIds((current) => {
+      const index = current.indexOf(assetId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   }
   async function createMenuItem(event: React.FormEvent) {
     event.preventDefault();
@@ -2900,7 +4113,8 @@ function ContentAdmin({
       });
       setNotice({
         tone: "success",
-        message: "Item menu berhasil dibuat (versi baru menunggu publish).",
+        message:
+          "Item menu berhasil dibuat. Aktifkan item agar dapat digunakan.",
       });
       setNewItemNameId("");
       setNewItemNameEn("");
@@ -2980,7 +4194,7 @@ function ContentAdmin({
     try {
       await post("/api/staff/admin/menu", {
         action: "CREATE_CATEGORY",
-        categoryCode,
+        categoryCode: autoGeneratedCategoryCode,
         nameId,
         nameEn,
         sortOrder: Number(sortOrder),
@@ -2989,7 +4203,6 @@ function ContentAdmin({
         tone: "success",
         message: "Kategori menu F&B berhasil dibuat.",
       });
-      setCategoryCode("");
       setNameId("");
       setNameEn("");
       setSortOrder("0");
@@ -3106,11 +4319,17 @@ function ContentAdmin({
     <div className={styles.contentAdminLayout}>
       <div className={styles.contentAdminPrimaryGrid}>
         <div className={styles.contentAdminColumn}>
-          <section className={styles.formCard}>
+          <section className={`${styles.formCard} ${styles.roomUploadCard}`}>
             <div className={styles.panelHeader}>
-              <h2>Upload foto asli</h2>
+              <div>
+                <h2>Tambah foto kamar</h2>
+                <p className={styles.formHint}>
+                  Pilih jenis kamar dan beberapa foto. Sistem langsung
+                  menambahkannya ke galeri kamar.
+                </p>
+              </div>
               {!canManageMedia ? (
-                <span className={styles.countPill}>Read only</span>
+                <span className={styles.countPill}>Hanya lihat</span>
               ) : null}
             </div>
             {!canManageMedia ? (
@@ -3119,12 +4338,29 @@ function ContentAdmin({
               </p>
             ) : null}
             <form className={styles.staffForm} onSubmit={upload}>
-              <FileField
+              <div className={styles.roomGallerySelect}>
+                <span>Tambahkan foto ke jenis kamar</span>
+                <KookaSelect
+                  ariaLabel="Jenis kamar tujuan upload"
+                  emptyMessage="Belum ada jenis kamar aktif"
+                  onChange={setSelectedUploadRoomTypeId}
+                  options={activeRoomTypes.map((roomType) => ({
+                    value: String(roomType.roomTypeId),
+                    label: String(roomType.nameId ?? roomType.code),
+                  }))}
+                  placeholder="Pilih jenis kamar"
+                  value={selectedUploadRoomTypeId}
+                />
+                <small className={styles.formHint}>
+                  Pilih kategori kamar, bukan nomor kamar fisik.
+                </small>
+              </div>
+              <MultiFileField
                 accept="image/jpeg,image/png"
-                file={file}
-                helper="JPEG atau PNG · gunakan foto asli properti"
+                files={files}
+                helper="JPEG atau PNG · pilih hingga 20 foto asli properti"
                 label="Foto JPEG / PNG"
-                onChange={setFile}
+                onChange={setFiles}
               />
               <label>
                 Judul
@@ -3151,22 +4387,190 @@ function ContentAdmin({
                   />
                 </label>
               </div>
-              <label>
-                Sumber / hak penggunaan
-                <input
-                  required
+              <div className={styles.roomGallerySelect}>
+                <span>Kepemilikan foto</span>
+                <KookaSelect
+                  ariaLabel="Kepemilikan foto"
+                  onChange={setRights}
+                  options={[
+                    {
+                      value: "Foto milik KOOKA Residence",
+                      label: "Milik KOOKA Residence",
+                      description: "Foto diambil atau dimiliki oleh KOOKA.",
+                    },
+                    {
+                      value: "Foto mitra dengan izin penggunaan",
+                      label: "Foto mitra dengan izin",
+                      description:
+                        "Fotografer atau mitra mengizinkan KOOKA memakai foto.",
+                    },
+                  ]}
                   value={rights}
-                  onChange={(event) => setRights(event.target.value)}
                 />
-              </label>
+                <small className={styles.formHint}>
+                  Catatan internal untuk memastikan foto boleh ditampilkan di
+                  website.
+                </small>
+              </div>
               <button
                 className={styles.primaryButton}
-                disabled={!canManageMedia}
+                disabled={
+                  !canManageMedia ||
+                  !canPublishMedia ||
+                  !selectedUploadRoomTypeId ||
+                  !files.length
+                }
                 type="submit"
               >
-                Upload ke galeri
+                {files.length > 1
+                  ? `Upload & tambahkan ${files.length} foto`
+                  : "Upload & tambahkan foto"}
               </button>
             </form>
+          </section>
+          <section className={`${styles.panel} ${styles.roomGalleryPanel}`}>
+            <div className={styles.panelHeader}>
+              <div>
+                <h2>Galeri foto kamar</h2>
+                <p className={styles.formHint}>
+                  Gunakan bagian ini untuk mengubah pilihan atau urutan foto.
+                  Foto urutan pertama menjadi foto utama di landing page.
+                </p>
+              </div>
+              <span className={styles.countPill}>
+                {selectedGalleryAssetIds.length} dipilih
+              </span>
+            </div>
+            <div className={styles.roomGalleryBody}>
+              <div className={styles.roomGallerySelect}>
+                <span>Jenis kamar</span>
+                <KookaSelect
+                  ariaLabel="Jenis kamar untuk galeri"
+                  emptyMessage="Belum ada jenis kamar aktif"
+                  onChange={selectGalleryRoomType}
+                  options={activeRoomTypes.map((roomType) => ({
+                    value: String(roomType.roomTypeId),
+                    label: String(roomType.nameId ?? roomType.code),
+                  }))}
+                  placeholder="Pilih jenis kamar"
+                  value={selectedGalleryRoomTypeId}
+                />
+              </div>
+              {selectedGalleryRoomTypeId ? (
+                <>
+                  <div className={styles.roomGalleryPicker}>
+                    {assets
+                      .filter(
+                        (asset) =>
+                          String(asset.status) === "PUBLISHED" &&
+                          String(asset.scanStatus) === "CLEAN" &&
+                          Boolean(asset.authenticPropertyMedia),
+                      )
+                      .map((asset) => {
+                        const assetId = String(asset.id);
+                        const checked =
+                          selectedGalleryAssetIds.includes(assetId);
+                        return (
+                          <label
+                            className={`${styles.roomGalleryAsset} ${checked ? styles.roomGalleryAssetSelected : ""}`}
+                            key={assetId}
+                          >
+                            <Image
+                              alt={String(
+                                asset.altId ?? asset.title ?? "Foto kamar",
+                              )}
+                              height={100}
+                              src={`/api/content/media/${assetId}`}
+                              unoptimized
+                              width={150}
+                            />
+                            <span>
+                              <input
+                                checked={checked}
+                                onChange={(event) =>
+                                  setSelectedGalleryAssetIds((current) =>
+                                    event.target.checked
+                                      ? [...current, assetId]
+                                      : current.filter((id) => id !== assetId),
+                                  )
+                                }
+                                type="checkbox"
+                              />
+                              {String(asset.title || "Foto kamar")}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                  {!assets.some(
+                    (asset) =>
+                      String(asset.status) === "PUBLISHED" &&
+                      String(asset.scanStatus) === "CLEAN" &&
+                      Boolean(asset.authenticPropertyMedia),
+                  ) ? (
+                    <p className={styles.emptyCompact}>
+                      Belum ada foto yang siap digunakan. Publikasikan foto di
+                      daftar media terlebih dahulu.
+                    </p>
+                  ) : null}
+                  {selectedGalleryAssetIds.length ? (
+                    <div className={styles.roomGalleryOrder}>
+                      <strong>Urutan galeri</strong>
+                      {selectedGalleryAssetIds.map((assetId, index) => {
+                        const asset = assets.find(
+                          (candidate) => String(candidate.id) === assetId,
+                        );
+                        return (
+                          <div key={assetId}>
+                            <span>
+                              {index + 1}.{" "}
+                              {String(asset?.title || "Foto kamar")}
+                              {index === 0 ? " · foto utama" : ""}
+                            </span>
+                            <span className={styles.inlineActions}>
+                              <button
+                                aria-label="Naikkan urutan foto"
+                                className={styles.textButton}
+                                disabled={index === 0}
+                                onClick={() => moveGalleryAsset(assetId, -1)}
+                                type="button"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                aria-label="Turunkan urutan foto"
+                                className={styles.textButton}
+                                disabled={
+                                  index === selectedGalleryAssetIds.length - 1
+                                }
+                                onClick={() => moveGalleryAsset(assetId, 1)}
+                                type="button"
+                              >
+                                ↓
+                              </button>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <button
+                    className={styles.primaryButton}
+                    disabled={
+                      !canManageMedia || !selectedGalleryAssetIds.length
+                    }
+                    onClick={() => void saveRoomGallery()}
+                    type="button"
+                  >
+                    Simpan galeri kamar
+                  </button>
+                </>
+              ) : (
+                <p className={styles.emptyCompact}>
+                  Pilih jenis kamar untuk melihat dan mengatur fotonya.
+                </p>
+              )}
+            </div>
           </section>
           <section className={`${styles.panel} ${styles.menuCatalogPanel}`}>
             <div className={styles.panelHeader}>
@@ -3175,8 +4579,8 @@ function ContentAdmin({
             </div>
             {!canManageMedia ? (
               <p className={styles.emptyCompact}>
-                Akses katalog media tidak aktif di role ini. Mintalah hak{" "}
-                <strong>cms.media.manage</strong> untuk melihat data media.
+                Akses galeri media tidak aktif untuk akun ini. Hubungi Owner
+                bila Anda perlu mengelola foto.
               </p>
             ) : null}
             {assets.length ? (
@@ -3198,9 +4602,23 @@ function ContentAdmin({
                           : "Foto non-properti"}
                       </small>
                     </div>
-                    <span className={styles.statusPill}>
-                      {String(asset.mimeType || "N/A")}
-                    </span>
+                    <div className={styles.inlineActions}>
+                      <span className={styles.statusPill}>
+                        {String(asset.mimeType || "N/A")}
+                      </span>
+                      {String(asset.status) === "DRAFT" ? (
+                        <button
+                          className={styles.secondaryButton}
+                          disabled={!canPublishMedia}
+                          onClick={() => void publishMedia(String(asset.id))}
+                          type="button"
+                        >
+                          {String(asset.scanStatus) === "PENDING"
+                            ? "Periksa & publikasikan"
+                            : "Publikasikan"}
+                        </button>
+                      ) : null}
+                    </div>
                   </article>
                 ))}
               </div>
@@ -3216,7 +4634,7 @@ function ContentAdmin({
             <div className={styles.panelHeader}>
               <h2>Kategori menu</h2>
               {!canManageMenu ? (
-                <span className={styles.countPill}>Read only</span>
+                <span className={styles.countPill}>Hanya lihat</span>
               ) : null}
             </div>
             {!canManageMenu ? (
@@ -3227,17 +4645,7 @@ function ContentAdmin({
             <form className={styles.staffForm} onSubmit={createCategory}>
               <div className={styles.formGrid}>
                 <label>
-                  Kode
-                  <input
-                    required
-                    value={categoryCode}
-                    onChange={(event) =>
-                      setCategoryCode(event.target.value.toUpperCase())
-                    }
-                  />
-                </label>
-                <label>
-                  Urutan
+                  Urutan tampilan
                   <input
                     min="0"
                     type="number"
@@ -3262,6 +4670,9 @@ function ContentAdmin({
                   />
                 </label>
               </div>
+              <p className={styles.formHint}>
+                Kode kategori dibuat otomatis oleh sistem.
+              </p>
               <button
                 className={styles.primaryButton}
                 disabled={!canManageMenu}
@@ -3297,14 +4708,6 @@ function ContentAdmin({
               </label>
               <div className={styles.formGrid}>
                 <label>
-                  Kode item
-                  <input
-                    readOnly
-                    value={autoGeneratedMenuItemCode}
-                    title="Kode item dibuat otomatis."
-                  />
-                </label>
-                <label>
                   Nama Indonesia
                   <input
                     required
@@ -3330,6 +4733,9 @@ function ContentAdmin({
                   />
                 </label>
               </div>
+              <p className={styles.formHint}>
+                Kode menu dibuat otomatis setelah item disimpan.
+              </p>
               <label>
                 Deskripsi Indonesia
                 <textarea
@@ -3351,12 +4757,21 @@ function ContentAdmin({
                 />
               </label>
               <label>
-                ID versi pajak profil (opsional)
-                <input
+                Pajak menu (opsional)
+                <KookaSelect
+                  ariaLabel="Pajak menu"
+                  onChange={setNewItemTaxProfileId}
+                  options={[
+                    { value: "", label: "Tanpa pajak" },
+                    ...activeFnbTaxes.map((tax) => ({
+                      value: String(tax.versionId),
+                      label: String(tax.name ?? "Pajak F&B"),
+                      description: tax.noTax
+                        ? "Tanpa pajak"
+                        : `Pajak ${percent(tax.taxRate)} · layanan ${percent(tax.serviceChargeRate)}`,
+                    })),
+                  ]}
                   value={newItemTaxProfileId}
-                  onChange={(event) =>
-                    setNewItemTaxProfileId(event.target.value)
-                  }
                 />
               </label>
               <div className={styles.formGrid}>
@@ -3370,7 +4785,7 @@ function ContentAdmin({
                 </label>
               </div>
               <label>
-                Alasan
+                Catatan perubahan (opsional)
                 <textarea
                   rows={2}
                   value={newItemReason}
@@ -3421,7 +4836,7 @@ function ContentAdmin({
                         });
                       }}
                     >
-                      Ajukan review
+                      Ajukan pemeriksaan
                     </button>
                   ) : null}
                   {page.versionId ? (
@@ -3438,7 +4853,7 @@ function ContentAdmin({
                         });
                       }}
                     >
-                      Publish
+                      Tampilkan di website
                     </button>
                   ) : null}
                 </div>
@@ -3485,7 +4900,9 @@ function ContentAdmin({
                         category.categoryNameEn ||
                         category.categoryCode}
                     </h3>
-                    <small>{category.categoryCode || "-"}</small>
+                    <small>
+                      Urutan {String(category.categorySortOrder ?? 0)}
+                    </small>
                   </div>
                   <div className={styles.menuCategoryMeta}>
                     <span className={styles.statusPill}>
@@ -3733,9 +5150,12 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
   async function changeRole(event: React.FormEvent, method: "POST" | "DELETE") {
     event.preventDefault();
     try {
+      const auditReason =
+        reason.trim() ||
+        `${method === "POST" ? "Pemberian" : "Pencabutan"} akses ${roleCode} oleh Owner`;
       await post(
         "/api/staff/role-grants",
-        { targetUserId, roleCode, reason },
+        { targetUserId, roleCode, reason: auditReason },
         method,
       );
       setNotice({
@@ -3766,7 +5186,9 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
         name: newStaffName.trim(),
         email: newStaffEmail.trim(),
         password: newStaffPassword,
-        employeeCode: newStaffEmployeeCode.trim(),
+        employeeCode:
+          newStaffEmployeeCode.trim() ||
+          internalCode(`STAFF-${newStaffName}`).slice(0, 40),
         reason: newStaffReason.trim() || "Provisioning staf baru",
       };
       if (newStaffDisplayName.trim()) {
@@ -3848,10 +5270,10 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
             />
           </label>
           <label>
-            Kode staf
+            Kode staf (opsional)
             <input
-              required
               maxLength={40}
+              placeholder="Dibuat otomatis bila dikosongkan"
               value={newStaffEmployeeCode}
               onChange={(event) => setNewStaffEmployeeCode(event.target.value)}
             />
@@ -3867,7 +5289,7 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
             />
           </label>
           <label>
-            Alasan
+            Catatan pembuatan (opsional)
             <textarea
               maxLength={500}
               value={newStaffReason}
@@ -3887,7 +5309,7 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
       </section>
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
-          <h2>Role staf</h2>
+          <h2>Atur akses staf</h2>
         </div>
         <form className={styles.staffForm}>
           <label>
@@ -3905,7 +5327,7 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
             />
           </label>
           <label>
-            Role
+            Akses
             <KookaSelect
               ariaLabel="Role staf"
               value={roleCode}
@@ -3919,10 +5341,8 @@ function TeamAdmin({ data, load, setNotice }: AdminProps) {
             />
           </label>
           <label>
-            Alasan
+            Catatan perubahan (opsional)
             <textarea
-              required
-              minLength={3}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />
@@ -4048,8 +5468,8 @@ function ReportAdmin({ setNotice }: { setNotice: (notice: Notice) => void }) {
         tone: "success",
         message:
           action === "RUN_RECONCILIATION"
-            ? "Reconciliation selesai. Periksa exception pada dashboard."
-            : "Daily rollover selesai diproses.",
+            ? "Pemeriksaan kesesuaian data selesai. Tinjau temuan pada dashboard."
+            : "Pergantian hari operasional selesai diproses.",
       });
       if (result.downloadUrl)
         window.location.assign(String(result.downloadUrl));
@@ -4103,15 +5523,22 @@ function ReportAdmin({ setNotice }: { setNotice: (notice: Notice) => void }) {
   }
   return (
     <div className={styles.actionGrid}>
-      <section className={styles.formCard}>
+      <details className={`${styles.formCard} ${styles.advancedOperations}`}>
+        <summary>
+          <div>
+            <span className={styles.pageEyebrow}>Alat lanjutan</span>
+            <strong>Perawatan operasional harian</strong>
+          </div>
+          <span>Biasanya berjalan otomatis</span>
+        </summary>
         <div className={styles.panelHeader}>
           <h2>Operasional harian</h2>
         </div>
         <div className={styles.staffForm}>
           <div className={styles.fieldGroup}>
-            <span>Business date</span>
+            <span>Tanggal operasional</span>
             <DateField
-              ariaLabel="Business date"
+              ariaLabel="Tanggal operasional"
               onChange={setBusinessDate}
               value={businessDate}
             />
@@ -4121,32 +5548,32 @@ function ReportAdmin({ setNotice }: { setNotice: (notice: Notice) => void }) {
               className={styles.secondaryButton}
               onClick={() => void run("RUN_RECONCILIATION")}
             >
-              Jalankan reconciliation
+              Periksa kesesuaian data
             </button>
             <button
               className={styles.primaryButton}
               onClick={() => void run("RUN_DAILY_ROLLOVER")}
             >
-              Jalankan rollover
+              Tutup hari operasional
             </button>
           </div>
           <div className={styles.operationExplanation}>
             <p>
-              <strong>Reconciliation</strong>
+              <strong>Periksa kesesuaian data</strong>
               Memeriksa apakah booking, kamar, pembayaran, tagihan, refund, dan
-              dokumen saling sesuai. Sistem hanya membuat daftar exception untuk
+              dokumen saling sesuai. Sistem hanya membuat daftar temuan untuk
               ditinjau dan tidak mengubah transaksi secara otomatis.
             </p>
             <p>
-              <strong>Rollover</strong>
+              <strong>Tutup hari operasional</strong>
               Menjalankan pergantian hari operasional: membuat tugas stayover
-              yang belum ada dan memeriksa exception hari tersebut. Biasanya
-              berjalan otomatis; tombol ini dipakai untuk UAT atau jika proses
-              otomatis perlu dijalankan ulang.
+              yang belum ada dan memeriksa temuan hari tersebut. Proses ini
+              biasanya berjalan otomatis dan hanya perlu dijalankan manual bila
+              proses otomatis gagal.
             </p>
           </div>
         </div>
-      </section>
+      </details>
       <section className={styles.formCard}>
         <div className={styles.panelHeader}>
           <h2>Export Excel</h2>

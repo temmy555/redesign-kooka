@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   recordAuditEvent: vi.fn(),
   enqueueOutboxEvent: vi.fn(),
   saveStoredFile: vi.fn(),
+  runMalwareScan: vi.fn(),
   purgeStoredFile: vi.fn(),
   readPublicStoredFile: vi.fn(),
 }));
@@ -23,7 +24,9 @@ vi.mock("../../src/platform/outbox", () => ({
   enqueueOutboxEvent: mocks.enqueueOutboxEvent,
 }));
 vi.mock("../../src/platform/file-storage", () => ({
+  noopMalwareScanner: vi.fn(),
   saveStoredFile: mocks.saveStoredFile,
+  runMalwareScan: mocks.runMalwareScan,
   purgeStoredFile: mocks.purgeStoredFile,
   readPublicStoredFile: mocks.readPublicStoredFile,
 }));
@@ -43,6 +46,7 @@ import {
   linkCmsMedia,
   publishCmsMedia,
   readPublishedMedia,
+  setRoomTypeGallery,
   uploadCmsMedia,
 } from "../../src/modules/content/media-service";
 
@@ -91,6 +95,11 @@ function queuedDatabase(
     mutation.where = vi.fn().mockResolvedValue(undefined);
     return mutation;
   });
+  db.delete = vi.fn(() => {
+    const mutation: Record<string, ReturnType<typeof vi.fn>> = {};
+    mutation.where = vi.fn().mockResolvedValue(undefined);
+    return mutation;
+  });
   db.transaction = vi.fn(async (callback: (tx: typeof db) => unknown) =>
     callback(db),
   );
@@ -114,6 +123,7 @@ describe("Batch 4 content service safeguards", () => {
     mocks.recordAuditEvent.mockReset().mockResolvedValue(undefined);
     mocks.enqueueOutboxEvent.mockReset().mockResolvedValue(undefined);
     mocks.saveStoredFile.mockReset();
+    mocks.runMalwareScan.mockReset().mockResolvedValue("CLEAN");
     mocks.purgeStoredFile.mockReset().mockResolvedValue(undefined);
     mocks.readPublicStoredFile.mockReset();
     process.env.BETTER_AUTH_SECRET = "a".repeat(48);
@@ -347,6 +357,40 @@ describe("Batch 4 content service safeguards", () => {
         sortOrder: 1,
       }),
     ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("replaces a room gallery while preserving its photo order", async () => {
+    const asset = (id: string) => ({
+      id,
+      fileId: U2,
+      status: "PUBLISHED",
+      authenticPropertyMedia: true,
+      rightsSource: "KOOKA",
+      altId: "Kamar",
+      altEn: "Room",
+      scanStatus: "CLEAN",
+      purgedAt: null,
+    });
+    const db = queuedDatabase([[{ id: U2 }], [asset(U1)], [asset(U2)]]);
+    mocks.getDatabase.mockReturnValue(db);
+    await expect(
+      setRoomTypeGallery({
+        session,
+        propertyId: U2,
+        roomTypeId: U2,
+        assetIds: [U1, U2],
+      }),
+    ).resolves.toMatchObject({
+      roomTypeId: U2,
+      assetIds: [U1, U2],
+      heroAssetId: U1,
+    });
+    expect(db.delete).toHaveBeenCalledOnce();
+    expect(db.insert).toHaveBeenCalledOnce();
+    expect(mocks.recordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "cms.media.room_gallery.set" }),
+      db,
+    );
   });
 
   it("resolves published CMS content and operational room data together", async () => {
@@ -689,7 +733,8 @@ describe("Batch 4 content service safeguards", () => {
           authenticPropertyMedia: true,
         },
       }),
-    ).resolves.toMatchObject({ id: U2, scanStatus: "PENDING" });
+    ).resolves.toMatchObject({ id: U2, scanStatus: "CLEAN" });
+    expect(mocks.runMalwareScan).toHaveBeenCalledWith(U1, expect.any(Function));
 
     const mediaRow = {
       id: U2,
@@ -725,6 +770,59 @@ describe("Batch 4 content service safeguards", () => {
     ).resolves.toMatchObject({ status: "ARCHIVED" });
   });
 
+  it("purges CMS media when file inspection rejects the upload", async () => {
+    mocks.saveStoredFile.mockResolvedValue({
+      id: U1,
+      scanStatus: "PENDING",
+    });
+    mocks.runMalwareScan.mockResolvedValue("REJECTED");
+    await expect(
+      uploadCmsMedia({
+        session,
+        propertyId: U2,
+        originalName: "unsafe.jpg",
+        mimeType: "image/jpeg",
+        bytes: Buffer.from([0xff, 0xd8, 0xff]),
+        metadata: {
+          altId: "Foto kamar",
+          altEn: "Room photo",
+          rightsSource: "Owned by KOOKA",
+          authenticPropertyMedia: true,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mocks.purgeStoredFile).toHaveBeenCalledWith(U1, U1);
+  });
+
+  it("checks and publishes an older draft whose scan is still pending", async () => {
+    const db = queuedDatabase([
+      [
+        {
+          id: U2,
+          fileId: U1,
+          status: "DRAFT",
+          authenticPropertyMedia: true,
+          rightsSource: "Owned by KOOKA",
+          altId: "Foto kamar",
+          altEn: "Room photo",
+          scanStatus: "PENDING",
+          purgedAt: null,
+        },
+      ],
+    ]);
+    mocks.getDatabase.mockReturnValue(db);
+    mocks.runMalwareScan.mockResolvedValue("CLEAN");
+    await expect(
+      publishCmsMedia({
+        session,
+        propertyId: U2,
+        assetId: U2,
+        reason: "Inspect and publish existing draft",
+      }),
+    ).resolves.toMatchObject({ id: U2, status: "PUBLISHED" });
+    expect(mocks.runMalwareScan).toHaveBeenCalledWith(U1, expect.any(Function));
+  });
+
   it("blocks media publication until every readiness rule passes", async () => {
     const base = {
       id: U2,
@@ -752,6 +850,7 @@ describe("Batch 4 content service safeguards", () => {
     mocks.getDatabase.mockReturnValue(
       queuedDatabase([[{ ...base, scanStatus: "PENDING" }]]),
     );
+    mocks.runMalwareScan.mockResolvedValueOnce("REJECTED");
     await expect(
       publishCmsMedia({
         session,
@@ -789,7 +888,7 @@ describe("Batch 4 content service safeguards", () => {
     mocks.getDatabase.mockReturnValue(overviewDb);
     await expect(
       getMediaOverview({ session, propertyId: U2 }),
-    ).resolves.toEqual([{ id: U2, status: "PUBLISHED" }]);
+    ).resolves.toEqual([{ id: U2, status: "PUBLISHED", usages: [] }]);
 
     const publicDb = queuedDatabase([[{ fileId: U1 }]]);
     mocks.getDatabase.mockReturnValue(publicDb);

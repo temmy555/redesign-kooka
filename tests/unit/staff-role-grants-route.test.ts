@@ -93,7 +93,7 @@ describe("POST /api/staff/role-grants", () => {
   it("grants successfully for a permitted actor and never lets the client choose the property", async () => {
     requireCurrentSession.mockResolvedValue({ user: { id: "actor-1" } });
     getActivePropertyId.mockResolvedValue("property-1");
-    grantUserRole.mockResolvedValue(undefined);
+    grantUserRole.mockResolvedValue("granted");
 
     const response = await POST(
       jsonRequest("POST", {
@@ -105,9 +105,29 @@ describe("POST /api/staff/role-grants", () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "granted" });
     expect(grantUserRole).toHaveBeenCalledWith(
       expect.objectContaining({ propertyId: "property-1" }),
     );
+  });
+
+  it("returns success when the same role is already active", async () => {
+    requireCurrentSession.mockResolvedValue({ user: { id: "actor-1" } });
+    getActivePropertyId.mockResolvedValue("property-1");
+    grantUserRole.mockResolvedValue("already_active");
+
+    const response = await POST(
+      jsonRequest("POST", {
+        targetUserId: TARGET_ID,
+        roleCode: "FRONT_OFFICE",
+        reason: "Repeated assignment",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      status: "already_active",
+    });
   });
 });
 

@@ -137,6 +137,85 @@ export function FileField({
   );
 }
 
+export function MultiFileField({
+  accept,
+  files,
+  helper,
+  label,
+  maximumFiles = 20,
+  onChange,
+}: {
+  accept: string;
+  files: File[];
+  helper?: string;
+  label: string;
+  maximumFiles?: number;
+  onChange: (files: File[]) => void;
+}) {
+  const inputId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  return (
+    <div className={styles.fieldGroup}>
+      <span>{label}</span>
+      <input
+        accept={accept}
+        aria-label={label}
+        className={styles.fileInputHidden}
+        id={inputId}
+        multiple
+        onChange={(event) =>
+          onChange(Array.from(event.target.files ?? []).slice(0, maximumFiles))
+        }
+        ref={inputRef}
+        type="file"
+      />
+      <div className={styles.filePicker}>
+        <button
+          className={styles.filePickerButton}
+          onClick={() => inputRef.current?.click()}
+          type="button"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v5h14v-5" />
+          </svg>
+          {files.length ? "Ganti pilihan" : "Pilih beberapa foto"}
+        </button>
+        <div className={styles.filePickerMeta}>
+          <strong>
+            {files.length
+              ? `${files.length} foto dipilih`
+              : "Belum ada foto dipilih"}
+          </strong>
+          <small>
+            {files.length
+              ? `${Math.max(1, Math.round(totalSize / 1024)).toLocaleString("id-ID")} KB · maks. ${maximumFiles} foto`
+              : (helper ?? `Maksimum ${maximumFiles} foto`)}
+          </small>
+        </div>
+        {files.length ? (
+          <button
+            aria-label="Hapus semua foto terpilih"
+            className={styles.filePickerClear}
+            onClick={() => {
+              if (inputRef.current) inputRef.current.value = "";
+              onChange([]);
+            }}
+            type="button"
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+      {files.length ? (
+        <small className={styles.fileSelectionSummary}>
+          {files.map((file) => file.name).join(" · ")}
+        </small>
+      ) : null}
+    </div>
+  );
+}
+
 export function ActionDialog({
   children,
   confirmDisabled = false,

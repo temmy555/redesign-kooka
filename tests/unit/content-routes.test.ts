@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   publishCmsMedia: vi.fn(),
   archiveCmsMedia: vi.fn(),
   linkCmsMedia: vi.fn(),
+  setRoomTypeGallery: vi.fn(),
 }));
 
 vi.mock("../../src/platform/session", () => ({
@@ -44,6 +45,7 @@ vi.mock("../../src/modules/content/media-service", () => ({
   publishCmsMedia: mocks.publishCmsMedia,
   archiveCmsMedia: mocks.archiveCmsMedia,
   linkCmsMedia: mocks.linkCmsMedia,
+  setRoomTypeGallery: mocks.setRoomTypeGallery,
 }));
 
 import { GET as landingGet } from "../../app/api/content/landing/route";
@@ -271,6 +273,28 @@ describe("Batch 4 content routes", () => {
         propertyId: U2,
         targetId: U2,
         usageType: "ROOM_TYPE_HERO",
+      }),
+    );
+  });
+
+  it("sets an ordered multi-photo room gallery", async () => {
+    const response = await mediaPatch(
+      jsonRequest(
+        "/api/staff/admin/media",
+        {
+          action: "SET_ROOM_GALLERY",
+          roomTypeId: U2,
+          assetIds: [U1, U2],
+        },
+        "PATCH",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.setRoomTypeGallery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyId: U2,
+        roomTypeId: U2,
+        assetIds: [U1, U2],
       }),
     );
   });

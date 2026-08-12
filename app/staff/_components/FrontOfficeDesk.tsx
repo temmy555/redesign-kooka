@@ -274,6 +274,19 @@ export function human(
     : fallback;
 }
 
+export function bookingStatusLabel(status: string) {
+  return (
+    {
+      ON_HOLD: "Menunggu pembayaran",
+      CONFIRMED: "Terkonfirmasi",
+      CANCELLED: "Dibatalkan",
+      EXPIRED: "Kedaluwarsa",
+      COMPLETED: "Selesai",
+      NO_SHOW: "Tidak datang",
+    }[status] ?? human(status)
+  );
+}
+
 export function isActiveReservationRoom(room: { lineStatus: string }) {
   return room.lineStatus === "ACTIVE";
 }
@@ -1025,19 +1038,36 @@ function BookingTable({
   const [cancelReason, setCancelReason] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("ALL");
-  const refresh = async (page: number, pageSize: number) => {
-    try {
-      await loadPage(page, pageSize, search.trim(), status);
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Daftar booking gagal dimuat.",
-      });
-    }
-  };
+  const refresh = useCallback(
+    async (page: number, pageSize: number, showError = true) => {
+      try {
+        await loadPage(page, pageSize, search.trim(), status);
+      } catch (error) {
+        if (!showError) return;
+        setNotice({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Daftar booking gagal dimuat.",
+        });
+      }
+    },
+    [loadPage, search, setNotice, status],
+  );
+
+  useEffect(() => {
+    const refreshVisiblePage = () => {
+      if (document.visibilityState !== "visible" || cancellingId) return;
+      void refresh(pagination.page, pagination.pageSize, false);
+    };
+    const interval = window.setInterval(refreshVisiblePage, 30_000);
+    document.addEventListener("visibilitychange", refreshVisiblePage);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshVisiblePage);
+    };
+  }, [cancellingId, pagination.page, pagination.pageSize, refresh]);
   async function cancel() {
     if (!cancellingId || cancelReason.trim().length < 3) return;
     try {
@@ -1131,9 +1161,20 @@ function BookingTable({
                   <small>{bookingPaymentDescription(booking)}</small>
                 </td>
                 <td>
-                  <span className={styles.statusPill}>
-                    {human(booking.status)}
+                  <span
+                    className={`${styles.statusPill} ${
+                      booking.status === "EXPIRED"
+                        ? styles.statusPillExpired
+                        : ""
+                    }`}
+                  >
+                    {bookingStatusLabel(booking.status)}
                   </span>
+                  {booking.status === "EXPIRED" ? (
+                    <small className={styles.statusDetail}>
+                      Batas pembayaran berakhir
+                    </small>
+                  ) : null}
                 </td>
                 <td>
                   {!["CANCELLED", "COMPLETED", "EXPIRED"].includes(

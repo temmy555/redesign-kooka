@@ -5,6 +5,8 @@ import { dirname, resolve } from "node:path";
 import nodemailer from "nodemailer";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
+import { expireReservationPaymentHold } from "./reservation-expiry.mjs";
+
 const A5 = { width: 419.53, height: 595.28 };
 const INVOICE_IDENTITY = {
   name: "KOOKA RESIDENCE SURABAYA",
@@ -746,81 +748,12 @@ export function createOutboxHandlers(environment, pool) {
            for update`,
           [reservationId],
         );
-        const reservation = selected.rows[0];
-        if (
-          !reservation ||
-          reservation.status !== "ON_HOLD" ||
-          !reservation.payment_deadline_at ||
-          new Date(reservation.payment_deadline_at) > new Date()
-        ) {
-          await client.query("commit");
-          return { skipped: "not-due" };
-        }
-        const review = await client.query(
-          `select 1 from payments
-           where folio_id = $1 and status = 'PENDING_VERIFICATION'
-             and received_at <= $2
-           limit 1`,
-          [reservation.folio_id, reservation.payment_deadline_at],
-        );
-        if (review.rowCount) {
-          await client.query("commit");
-          return { skipped: "payment-review-hold" };
-        }
-        await client.query(
-          `update reservations
-           set status = 'EXPIRED', updated_at = now(), version = version + 1
-           where id = $1`,
-          [reservationId],
-        );
-        await client.query(
-          `insert into reservation_status_events
-             (reservation_id, action, from_status, to_status, reason)
-           values ($1, 'EXPIRE', 'ON_HOLD', 'EXPIRED', 'Payment deadline elapsed without evidence under review')`,
-          [reservationId],
-        );
-        const claims = await client.query(
-          `update inventory_claims
-           set claim_status = 'EXPIRED', released_at = now(), updated_at = now(), version = version + 1
-           where source_type = 'RESERVATION' and source_id = $1
-             and claim_type = 'PAYMENT_HOLD' and claim_status = 'ACTIVE'
-           returning id`,
-          [reservationId],
-        );
-        for (const claim of claims.rows) {
-          await client.query(
-            `insert into inventory_claim_events
-               (inventory_claim_id, action, from_status, to_status, reason)
-             values ($1, 'EXPIRE', 'ACTIVE', 'EXPIRED', 'Reservation payment deadline elapsed')`,
-            [claim.id],
-          );
-        }
-        await client.query(
-          `update resource_claims
-           set claim_status = 'EXPIRED', released_at = now(),
-               updated_at = now(), version = version + 1
-           where reservation_room_id in (
-             select id from reservation_rooms where reservation_id = $1
-           ) and claim_status = 'ACTIVE'`,
-          [reservationId],
-        );
-        await client.query(
-          `update notification_messages
-           set status = 'CANCELLED', updated_at = now(), version = version + 1
-           where reservation_id = $1 and status = 'QUEUED'`,
-          [reservationId],
-        );
-        await client.query(
-          `insert into audit_events
-             (property_id, actor_type, action, target_type, target_id,
-              after_json, reason, result)
-           values ($1, 'system', 'booking.reservation.expire', 'reservation', $2,
-             jsonb_build_object('status', 'EXPIRED'),
-             'Payment deadline elapsed without evidence under review', 'SUCCESS')`,
-          [reservation.property_id, reservationId],
+        const result = await expireReservationPaymentHold(
+          client,
+          selected.rows[0],
         );
         await client.query("commit");
-        return { expired: true, releasedClaims: claims.rowCount };
+        return result;
       } catch (error) {
         await client.query("rollback");
         throw error;

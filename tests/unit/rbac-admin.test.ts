@@ -10,9 +10,11 @@ function selectChain(rows: unknown[]) {
   return chain;
 }
 
-function insertChain() {
+function insertChain(returning: unknown[] = [{ userId: "inserted" }]) {
   const chain = {
-    values: () => Promise.resolve(undefined),
+    values: () => chain,
+    onConflictDoNothing: () => chain,
+    returning: () => Promise.resolve(returning),
   };
   return chain;
 }
@@ -122,7 +124,7 @@ describe("grantUserRole", () => {
     select.mockImplementationOnce(() => selectChain([{ id: ROLE_ID }]));
     insert.mockImplementation(() => insertChain());
 
-    await grantUserRole({
+    const result = await grantUserRole({
       session,
       targetUserId: TARGET_ID,
       roleCode: "FRONT_OFFICE",
@@ -130,6 +132,7 @@ describe("grantUserRole", () => {
       reason: "Front office assignment",
     });
 
+    expect(result).toBe("granted");
     expect(insert).toHaveBeenCalledTimes(1);
     expect(recordSecurityEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -143,6 +146,24 @@ describe("grantUserRole", () => {
       expect.objectContaining({ action: "identity.role.grant" }),
       expect.anything(),
     );
+  });
+
+  it("treats an overlapping role grant as an idempotent no-op", async () => {
+    requirePermission.mockResolvedValue(undefined);
+    select.mockImplementationOnce(() => selectChain([{ id: ROLE_ID }]));
+    insert.mockImplementation(() => insertChain([]));
+
+    const result = await grantUserRole({
+      session,
+      targetUserId: TARGET_ID,
+      roleCode: "FRONT_OFFICE",
+      propertyId: PROPERTY_ID,
+      reason: "Repeated front office assignment",
+    });
+
+    expect(result).toBe("already_active");
+    expect(recordAuditEvent).not.toHaveBeenCalled();
+    expect(recordSecurityEvent).not.toHaveBeenCalled();
   });
 
   it("throws on an unknown role code instead of silently no-op-ing", async () => {

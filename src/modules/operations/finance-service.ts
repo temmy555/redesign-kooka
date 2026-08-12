@@ -633,7 +633,7 @@ export async function issueFinancialDocument(params: {
       if (!profile)
         throw new AppError(
           "CONFLICT",
-          "Profil dokumen aktif belum dikonfigurasi",
+          "Profil invoice dan kuitansi belum aktif. Lengkapi melalui Pengaturan → Harga & pembayaran → Profil invoice & kuitansi.",
         );
       const filters = [eq(folioEntries.folioId, params.folioId)];
       if (params.scope === "ROOM_ONLY")

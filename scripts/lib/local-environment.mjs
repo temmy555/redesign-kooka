@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +10,57 @@ export const projectRoot = dirname(
 const infrastructurePath = join(projectRoot, ".env.infrastructure");
 const applicationPath = join(projectRoot, ".env.local");
 const applicationExamplePath = join(projectRoot, ".env.example");
+
+function generatedSecret() {
+  return randomBytes(32).toString("base64");
+}
+
+function configuredValue(contents, key) {
+  const match = contents.match(new RegExp(`^${key}=(.*)$`, "mu"));
+  return match?.[1]?.trim() ?? "";
+}
+
+function setEnvironmentValue(contents, key, value) {
+  const pattern = new RegExp(`^${key}=.*$`, "mu");
+  if (pattern.test(contents))
+    return contents.replace(pattern, `${key}=${value}`);
+  return `${contents.trimEnd()}\n${key}=${value}\n`;
+}
+
+function ensureGeneratedSecrets(contents) {
+  const updatedKeys = [];
+  let updated = contents;
+  const authSecret = configuredValue(updated, "BETTER_AUTH_SECRET");
+  if (!authSecret || authSecret === "generate-with-openssl-rand-base64-32") {
+    updated = setEnvironmentValue(
+      updated,
+      "BETTER_AUTH_SECRET",
+      generatedSecret(),
+    );
+    updatedKeys.push("BETTER_AUTH_SECRET");
+  }
+
+  const encryptionKey = configuredValue(updated, "DATA_ENCRYPTION_KEY");
+  let decodedKeyLength = 0;
+  try {
+    decodedKeyLength = Buffer.from(encryptionKey, "base64").length;
+  } catch {
+    decodedKeyLength = 0;
+  }
+  if (
+    !encryptionKey ||
+    encryptionKey === "generate-with-openssl-rand-base64-32" ||
+    decodedKeyLength !== 32
+  ) {
+    updated = setEnvironmentValue(
+      updated,
+      "DATA_ENCRYPTION_KEY",
+      generatedSecret(),
+    );
+    updatedKeys.push("DATA_ENCRYPTION_KEY");
+  }
+  return { contents: updated, updatedKeys };
+}
 
 export function parseEnvironmentFile(contents) {
   return Object.fromEntries(
@@ -26,8 +78,17 @@ export function parseEnvironmentFile(contents) {
 
 export function ensureLocalApplicationEnvironment() {
   if (existsSync(applicationPath)) {
+    const current = readFileSync(applicationPath, "utf8");
+    const ensured = ensureGeneratedSecrets(current);
+    if (ensured.updatedKeys.length > 0) {
+      writeFileSync(applicationPath, ensured.contents, { mode: 0o600 });
+    }
     chmodSync(applicationPath, 0o600);
-    return { path: applicationPath, created: false };
+    return {
+      path: applicationPath,
+      created: false,
+      updatedKeys: ensured.updatedKeys,
+    };
   }
 
   if (!existsSync(infrastructurePath)) {
@@ -48,13 +109,18 @@ export function ensureLocalApplicationEnvironment() {
     throw new Error("Local infrastructure credentials are incomplete");
   }
 
-  const generated = readFileSync(applicationExamplePath, "utf8")
+  const fromTemplate = readFileSync(applicationExamplePath, "utf8")
     .replace("copy-from-env-infrastructure", databasePassword)
     .replace("copy-from-env-infrastructure", redisPassword);
+  const generated = ensureGeneratedSecrets(fromTemplate);
 
-  writeFileSync(applicationPath, generated, { mode: 0o600 });
+  writeFileSync(applicationPath, generated.contents, { mode: 0o600 });
   chmodSync(applicationPath, 0o600);
-  return { path: applicationPath, created: true };
+  return {
+    path: applicationPath,
+    created: true,
+    updatedKeys: generated.updatedKeys,
+  };
 }
 
 export function loadLocalApplicationEnvironment() {

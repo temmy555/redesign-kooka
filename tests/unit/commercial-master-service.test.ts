@@ -47,6 +47,7 @@ vi.mock("../../src/platform/encryption", () => ({
 }));
 
 import {
+  applyTaxProfileToActiveRatePlans,
   createDocumentProfileDraft,
   createDocumentSequence,
   createExchangeRateSnapshot,
@@ -134,6 +135,36 @@ describe("commercial master service", () => {
         reason: "Validate no tax profile",
       }),
     ).rejects.toThrow("must use zero");
+  });
+
+  it("applies only an active lodging-tax profile to room rates", async () => {
+    mocks.select
+      .mockReturnValueOnce(
+        chain([
+          {
+            profileId: U2,
+            domain: "LODGING",
+            lifecycleStatus: "ACTIVE",
+            effectiveFrom: new Date("2026-08-01T00:00:00.000Z"),
+            effectiveTo: null,
+          },
+        ]),
+      )
+      .mockReturnValueOnce(chain([]));
+
+    await expect(
+      applyTaxProfileToActiveRatePlans({
+        session,
+        propertyId: U1,
+        taxProfileVersionId: U3,
+        reason: "Apply lodging tax to room rates",
+        now: effectiveFrom,
+      }),
+    ).resolves.toMatchObject({
+      taxProfileId: U2,
+      updatedRatePlans: 0,
+      unchangedRatePlans: 0,
+    });
   });
 
   it("creates a bilingual cancellation-policy snapshot", async () => {

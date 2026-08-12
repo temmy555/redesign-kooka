@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
     : undefined,
   distDir: process.env.NEXT_DIST_DIR || ".next",
   output: "standalone",
+  images: {
+    qualities: [75],
+  },
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {

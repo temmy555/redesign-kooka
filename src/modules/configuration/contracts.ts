@@ -7,6 +7,7 @@ export type VersionAction = "PUBLISH" | "RETIRE";
 
 export interface MutationResult {
   id: string;
+  parentId?: string;
   versionNumber?: number;
   lifecycleStatus?: string;
   approvalStatus?: string;

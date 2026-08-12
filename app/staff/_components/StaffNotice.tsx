@@ -9,6 +9,10 @@ export type StaffNoticeMessage = {
   message: string;
 } | null;
 
+export function canDismissStaffNoticePassively(notice: StaffNoticeMessage) {
+  return notice?.tone === "error";
+}
+
 export default function StaffNotice({
   notice,
   onDismiss,
@@ -16,21 +20,17 @@ export default function StaffNotice({
   notice: StaffNoticeMessage;
   onDismiss: () => void;
 }) {
+  const passiveDismissalAllowed = canDismissStaffNoticePassively(notice);
   useEffect(() => {
-    if (!notice) return;
+    if (!passiveDismissalAllowed) return;
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") onDismiss();
     }
     window.addEventListener("keydown", closeOnEscape);
-    const timeout =
-      notice.tone === "success"
-        ? window.setTimeout(onDismiss, 4_000)
-        : undefined;
     return () => {
       window.removeEventListener("keydown", closeOnEscape);
-      if (timeout) window.clearTimeout(timeout);
     };
-  }, [notice, onDismiss]);
+  }, [onDismiss, passiveDismissalAllowed]);
 
   if (!notice) return null;
   const success = notice.tone === "success";
@@ -38,7 +38,8 @@ export default function StaffNotice({
     <div
       className={styles.staffNoticeOverlay}
       onMouseDown={(event) => {
-        if (event.currentTarget === event.target) onDismiss();
+        if (passiveDismissalAllowed && event.currentTarget === event.target)
+          onDismiss();
       }}
     >
       <section
@@ -61,7 +62,7 @@ export default function StaffNotice({
           <p id="staff-notice-message">{notice.message}</p>
         </div>
         <button autoFocus onClick={onDismiss} type="button">
-          Tutup
+          {success ? "OK" : "Tutup"}
         </button>
       </section>
     </div>

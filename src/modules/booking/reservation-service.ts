@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import {
   bookingQuoteNights,
@@ -8,11 +8,11 @@ import {
   bookingQuotes,
   folioBillingBuckets,
   folioEntries,
+  folioStatusEvents,
   folios,
   guests,
   inventoryClaimEvents,
   inventoryClaims,
-  inventoryDays,
   notificationMessages,
   policyAcknowledgements,
   policySets,
@@ -21,6 +21,7 @@ import {
   propertySettingVersions,
   ratePlanVersions,
   resourceClaims,
+  resourceInventoryDays,
   reservationGuests,
   reservationAddons,
   reservationRoomNights,
@@ -38,6 +39,11 @@ import type { IdempotencyTransaction } from "../../platform/idempotency";
 import { enqueueOutboxEvent } from "../../platform/outbox";
 import type { CreateReservationRequest, StaffSessionLike } from "./contracts";
 import {
+  assertInventoryAvailable,
+  ensureInventoryDays,
+  readInventoryAvailability,
+} from "./availability";
+import {
   calculateRequiredPayment,
   generateBookingCode,
   normalizeEmail,
@@ -48,7 +54,7 @@ import {
   resolveActivePaymentInstructions,
 } from "./payment-instructions";
 
-const ONLINE_PAYMENT_MS = 2 * 60 * 60 * 1000;
+const ONLINE_PAYMENT_MS = 60 * 60 * 1000;
 const SAME_DAY_PAYMENT_MS = 60 * 60 * 1000;
 
 interface ExtraBedSnapshot extends Record<string, unknown> {
@@ -141,7 +147,7 @@ async function paymentDeadline(
     .orderBy(desc(propertySettingVersions.effectiveFrom));
   const setting = rows.find((row) => isEffective(row, now));
   const sameDay = checkInDate === now.toISOString().slice(0, 10);
-  const defaultMinutes = sameDay ? 60 : 120;
+  const defaultMinutes = 60;
   const configured = Number(
     setting?.values[
       sameDay ? "sameDayDeadlineMinutes" : "onlineDeadlineMinutes"
@@ -228,25 +234,112 @@ export async function createReservation(params: {
           ),
         )
         .orderBy(bookingQuoteNights.stayDate);
-      const checkoutClaims = await tx
-        .select()
-        .from(inventoryClaims)
-        .where(
-          and(
-            eq(inventoryClaims.sourceType, "BOOKING_QUOTE"),
-            eq(inventoryClaims.sourceId, quote.id),
-            eq(inventoryClaims.claimStatus, "ACTIVE"),
-          ),
-        )
-        .orderBy(inventoryClaims.inventoryDayId)
-        .for("update");
-      if (
-        checkoutClaims.length === 0 ||
-        checkoutClaims.some(
-          (claim) => claim.expiresAt && claim.expiresAt <= now,
-        )
-      ) {
-        throw new AppError("CONFLICT", "Checkout inventory hold has expired");
+      const roomTypeIds = [
+        ...new Set(quoteRooms.map((room) => room.roomTypeId)),
+      ];
+      const stayDates = [
+        ...new Set(quoteNights.map((night) => night.stayDate)),
+      ].sort();
+      await ensureInventoryDays(tx, params.propertyId, roomTypeIds, stayDates);
+      const liveInventory = await readInventoryAvailability(
+        tx,
+        params.propertyId,
+        roomTypeIds,
+        stayDates,
+        { lock: true, now },
+      );
+      const quantities = new Map<string, number>();
+      for (const room of quoteRooms) {
+        quantities.set(
+          room.roomTypeId,
+          (quantities.get(room.roomTypeId) ?? 0) + 1,
+        );
+      }
+      assertInventoryAvailable(liveInventory, quantities, stayDates);
+      const inventoryByTypeDate = new Map(
+        liveInventory.map((row) => [
+          `${row.roomTypeId}:${row.stayDate}`,
+          row.inventoryDayId,
+        ]),
+      );
+
+      const extraBedNeeds = new Map<string, number>();
+      const extraBedPoolIds = new Set<string>();
+      for (const night of quoteNights) {
+        const extraBed = readExtraBedSnapshot(night.priceSnapshot);
+        if (!extraBed?.resourcePoolId || extraBed.quantity < 1) continue;
+        const key = `${extraBed.resourcePoolId}:${night.stayDate}`;
+        extraBedPoolIds.add(extraBed.resourcePoolId);
+        extraBedNeeds.set(
+          key,
+          (extraBedNeeds.get(key) ?? 0) + extraBed.quantity,
+        );
+      }
+      const extraBedInventoryByPoolDate = new Map<string, string>();
+      if (extraBedPoolIds.size > 0) {
+        const resourceDays = await tx
+          .select()
+          .from(resourceInventoryDays)
+          .where(
+            and(
+              inArray(resourceInventoryDays.resourcePoolId, [
+                ...extraBedPoolIds,
+              ]),
+              inArray(resourceInventoryDays.stayDate, stayDates),
+            ),
+          )
+          .orderBy(
+            resourceInventoryDays.resourcePoolId,
+            resourceInventoryDays.stayDate,
+          )
+          .for("update");
+        const activeResourceClaims = resourceDays.length
+          ? await tx
+              .select({
+                resourceInventoryDayId: resourceClaims.resourceInventoryDayId,
+                quantity: resourceClaims.quantity,
+              })
+              .from(resourceClaims)
+              .where(
+                and(
+                  inArray(
+                    resourceClaims.resourceInventoryDayId,
+                    resourceDays.map((day) => day.id),
+                  ),
+                  eq(resourceClaims.claimStatus, "ACTIVE"),
+                  isNotNull(resourceClaims.reservationRoomId),
+                  sql`(${resourceClaims.expiresAt} is null or ${resourceClaims.expiresAt} > ${now})`,
+                ),
+              )
+          : [];
+        const usedByDay = new Map<string, number>();
+        for (const claim of activeResourceClaims) {
+          usedByDay.set(
+            claim.resourceInventoryDayId,
+            (usedByDay.get(claim.resourceInventoryDayId) ?? 0) + claim.quantity,
+          );
+        }
+        for (const day of resourceDays) {
+          const key = `${day.resourcePoolId}:${day.stayDate}`;
+          const requested = extraBedNeeds.get(key) ?? 0;
+          if (requested > day.physicalCapacity - (usedByDay.get(day.id) ?? 0)) {
+            throw new AppError(
+              "CONFLICT",
+              "Requested extra beds are no longer available",
+            );
+          }
+          extraBedInventoryByPoolDate.set(key, day.id);
+        }
+        if (
+          [...extraBedNeeds.keys()].some(
+            (key) => !extraBedInventoryByPoolDate.has(key),
+          )
+        ) {
+          throw new AppError(
+            "CONFLICT",
+            "Extra-bed inventory is not configured for the selected dates",
+          );
+        }
       }
 
       const [ratePlan] = await tx
@@ -438,49 +531,6 @@ export async function createReservation(params: {
         });
       }
 
-      const inventoryRows = await tx
-        .select({
-          id: inventoryDays.id,
-          roomTypeId: inventoryDays.roomTypeId,
-          stayDate: inventoryDays.stayDate,
-        })
-        .from(inventoryDays)
-        .where(
-          inArray(
-            inventoryDays.id,
-            checkoutClaims.map((claim) => claim.inventoryDayId),
-          ),
-        );
-      const inventoryByTypeDate = new Map(
-        inventoryRows.map((row) => [
-          `${row.roomTypeId}:${row.stayDate}`,
-          row.id,
-        ]),
-      );
-      const heldInventoryDayIds = new Set(
-        checkoutClaims.map((claim) => claim.inventoryDayId),
-      );
-      const quotedResourceClaims = await tx
-        .select()
-        .from(resourceClaims)
-        .where(
-          and(
-            inArray(
-              resourceClaims.bookingQuoteRoomId,
-              quoteRooms.map((room) => room.id),
-            ),
-            eq(resourceClaims.claimStatus, "ACTIVE"),
-          ),
-        )
-        .orderBy(resourceClaims.resourceInventoryDayId)
-        .for("update");
-      if (
-        quotedResourceClaims.some(
-          (claim) => claim.expiresAt && claim.expiresAt <= now,
-        )
-      ) {
-        throw new AppError("CONFLICT", "Extra-bed inventory hold has expired");
-      }
       const reservationRoomResults = [];
       const extraBedAddonByRoom = new Map<string, string>();
       for (const [index, quoteRoom] of quoteRooms.entries()) {
@@ -504,25 +554,29 @@ export async function createReservation(params: {
           .returning({ id: reservationRooms.id });
         if (!reservationRoom)
           throw new Error("Failed to create reservation room");
-        const roomResourceClaims = quotedResourceClaims.filter(
-          (claim) => claim.bookingQuoteRoomId === quoteRoom.id,
-        );
-        for (const sourceClaim of roomResourceClaims) {
-          await tx.insert(resourceClaims).values({
-            resourceInventoryDayId: sourceClaim.resourceInventoryDayId,
-            reservationRoomId: reservationRoom.id,
-            quantity: sourceClaim.quantity,
-            expiresAt: input.source === "ONLINE" ? deadline : null,
-            idempotencyKey: `reservation-resource:${reservation.id}:${reservationRoom.id}:${sourceClaim.resourceInventoryDayId}`,
-          });
-          await tx
-            .update(resourceClaims)
-            .set({ claimStatus: "RELEASED", releasedAt: now, updatedAt: now })
-            .where(eq(resourceClaims.id, sourceClaim.id));
-        }
         const nights = quoteNights.filter(
           (night) => night.quoteRoomId === quoteRoom.id,
         );
+        for (const night of nights) {
+          const extraBed = readExtraBedSnapshot(night.priceSnapshot);
+          if (!extraBed?.resourcePoolId || extraBed.quantity < 1) continue;
+          const resourceInventoryDayId = extraBedInventoryByPoolDate.get(
+            `${extraBed.resourcePoolId}:${night.stayDate}`,
+          );
+          if (!resourceInventoryDayId) {
+            throw new AppError(
+              "CONFLICT",
+              "Extra-bed inventory is not configured for the selected dates",
+            );
+          }
+          await tx.insert(resourceClaims).values({
+            resourceInventoryDayId,
+            reservationRoomId: reservationRoom.id,
+            quantity: extraBed.quantity,
+            expiresAt: input.source === "ONLINE" ? deadline : null,
+            idempotencyKey: `reservation-resource:${reservation.id}:${reservationRoom.id}:${night.stayDate}`,
+          });
+        }
         const nightlyExtraBeds = nights
           .map((night) => readExtraBedSnapshot(night.priceSnapshot))
           .filter((snapshot): snapshot is ExtraBedSnapshot =>
@@ -583,9 +637,8 @@ export async function createReservation(params: {
           const inventoryDayId = inventoryByTypeDate.get(
             `${quoteRoom.roomTypeId}:${night.stayDate}`,
           );
-          if (!inventoryDayId || !heldInventoryDayIds.has(inventoryDayId)) {
-            throw new AppError("CONFLICT", "Inventory hold is incomplete");
-          }
+          if (!inventoryDayId)
+            throw new AppError("CONFLICT", "Inventory is no longer available");
           const [claim] = await tx
             .insert(inventoryClaims)
             .values({
@@ -613,19 +666,6 @@ export async function createReservation(params: {
         reservationRoomResults.push({
           id: reservationRoom.id,
           lineNumber: index + 1,
-        });
-      }
-      for (const claim of checkoutClaims) {
-        await tx
-          .update(inventoryClaims)
-          .set({ claimStatus: "RELEASED", releasedAt: now, updatedAt: now })
-          .where(eq(inventoryClaims.id, claim.id));
-        await tx.insert(inventoryClaimEvents).values({
-          inventoryClaimId: claim.id,
-          action: "CONVERT_TO_RESERVATION",
-          fromStatus: "ACTIVE",
-          toStatus: "RELEASED",
-          reason: `Converted to reservation ${bookingCode}`,
         });
       }
       await tx
@@ -903,6 +943,33 @@ export async function cancelReservation(params: {
           select id from reservation_rooms where reservation_id = ${reservation.id}
         ) and claim_status = 'ACTIVE'
       `);
+      const closedFolios = await tx
+        .update(folios)
+        .set({
+          status: "CLOSED",
+          closedAt: now,
+          closedByUserId: params.session.user.id,
+          updatedAt: now,
+          updatedByUserId: params.session.user.id,
+        })
+        .where(
+          and(
+            eq(folios.reservationId, reservation.id),
+            eq(folios.status, "OPEN"),
+          ),
+        )
+        .returning({ id: folios.id });
+      if (closedFolios[0]) {
+        await tx.insert(folioStatusEvents).values({
+          folioId: closedFolios[0].id,
+          action: "CLOSE_AFTER_RESERVATION_CANCELLATION",
+          fromStatus: "OPEN",
+          toStatus: "CLOSED",
+          reason,
+          actorUserId: params.session.user.id,
+          createdByUserId: params.session.user.id,
+        });
+      }
       const physicalRelease = await tx.execute<{
         assignment_count: number;
         night_count: number;
@@ -973,6 +1040,7 @@ export async function cancelReservation(params: {
           before: { status: reservation.status },
           after: {
             status: "CANCELLED",
+            folioClosed: Boolean(closedFolios[0]),
             releasedClaimCount: claims.length,
             releasedPhysicalAssignments:
               physicalRelease.rows[0]?.assignment_count ?? 0,
