@@ -27,6 +27,29 @@ describe("application environment", () => {
     });
   });
 
+  it("accepts a bounded maintenance preview configuration", () => {
+    expect(
+      parseApplicationEnvironment({
+        ...localEnvironment,
+        SITE_MAINTENANCE_MODE: "on",
+        MAINTENANCE_PREVIEW_SECRET: "Kooka123",
+        MAINTENANCE_PREVIEW_DURATION_HOURS: "12",
+      }),
+    ).toMatchObject({
+      SITE_MAINTENANCE_MODE: "on",
+      MAINTENANCE_PREVIEW_DURATION_HOURS: 12,
+    });
+  });
+
+  it("rejects a maintenance preview password shorter than 8 characters", () => {
+    expect(() =>
+      parseApplicationEnvironment({
+        ...localEnvironment,
+        MAINTENANCE_PREVIEW_SECRET: "short7",
+      }),
+    ).toThrow(/at least 8 characters/u);
+  });
+
   it("rejects localhost and Mailpit in production-like environments", () => {
     expect(() =>
       parseApplicationEnvironment({

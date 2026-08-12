@@ -1,5 +1,11 @@
 import type { Metadata, Viewport } from "next";
+import { cookies } from "next/headers";
 
+import {
+  isMaintenanceModeEnabled,
+  isValidMaintenancePreviewToken,
+  MAINTENANCE_PREVIEW_COOKIE,
+} from "../src/platform/maintenance-preview";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -44,12 +50,29 @@ export const viewport: Viewport = {
   themeColor: "#123f35",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const cookieStore = await cookies();
+  const previewActive =
+    isMaintenanceModeEnabled() &&
+    isValidMaintenancePreviewToken(
+      cookieStore.get(MAINTENANCE_PREVIEW_COOKIE)?.value,
+    );
+
   return (
     <html lang="id" data-scroll-behavior="smooth">
-      <body>{children}</body>
+      <body>
+        {children}
+        {previewActive ? (
+          <aside className="maintenance-preview-banner">
+            <span>Production preview · public maintenance remains active</span>
+            <form action="/api/maintenance-preview/logout" method="post">
+              <button type="submit">Exit preview</button>
+            </form>
+          </aside>
+        ) : null}
+      </body>
     </html>
   );
 }

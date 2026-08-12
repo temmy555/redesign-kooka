@@ -1,33 +1,38 @@
 import { type NextRequest, NextResponse } from "next/server";
 
+import {
+  isMaintenanceModeEnabled,
+  isValidMaintenancePreviewToken,
+  MAINTENANCE_PREVIEW_COOKIE,
+} from "./src/platform/maintenance-preview";
 import { isTrustedStaffMutation } from "./src/platform/request-security";
-
-const TRUE_VALUES = new Set(["1", "true", "yes", "on", "enabled"]);
-function isTrue(value: string | undefined | null): boolean {
-  if (!value) return false;
-  return TRUE_VALUES.has(value.trim().toLowerCase());
-}
-
-function isMaintenanceEnabled() {
-  return isTrue(process.env.SITE_MAINTENANCE_MODE);
-}
 
 function isMaintenanceAllowedPath(pathname: string) {
   const allowlist = [
     "/staff",
-    "/staff/login",
+    "/api/auth",
     "/api/health",
+    "/api/staff",
+    "/api/content",
+    "/api/maintenance-preview",
     "/maintenance",
+    "/maintenance-preview",
+    "/preview",
     "/favicon.ico",
     "/robots.txt",
     "/sitemap.xml",
     "/manifest.webmanifest",
   ];
 
-  if (allowlist.some((prefix) => pathname.startsWith(prefix))) return true;
+  if (
+    allowlist.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
+    return true;
+  }
 
   if (
-    pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/images/") ||
     pathname.startsWith("/assets/") ||
@@ -45,9 +50,29 @@ function isStaffApiPath(pathname: string) {
 
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const previewActive = isValidMaintenancePreviewToken(
+    request.cookies.get(MAINTENANCE_PREVIEW_COOKIE)?.value,
+  );
 
-  if (isMaintenanceEnabled() && !isMaintenanceAllowedPath(pathname)) {
-    return NextResponse.rewrite(new URL("/maintenance", request.url));
+  if (
+    isMaintenanceModeEnabled() &&
+    !previewActive &&
+    !isMaintenanceAllowedPath(pathname)
+  ) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "SERVICE_UNAVAILABLE",
+            message: "The website is currently under maintenance",
+          },
+        },
+        { status: 503, headers: { "Retry-After": "3600" } },
+      );
+    }
+    return NextResponse.rewrite(new URL("/maintenance", request.url), {
+      status: 503,
+    });
   }
 
   if (

@@ -560,9 +560,6 @@ export default function LandingPage({
   const heroAlt =
     hero?.media?.[0]?.alt ||
     landingValue(hero, "imageAlt", "KOOKA Residence Surabaya");
-  const heroImageLabel = landingValue(hero, "imageLabel", "KOOKA Residence")
-    .split("·")[0]
-    .trim();
   const experienceImages = landingStrings(experience, "images").map(
     authenticImage,
   );
@@ -739,89 +736,83 @@ export default function LandingPage({
             />
           )}
           {heroVideo ? (
-            <div
-              className="hero-video-controls"
-              role="group"
-              aria-label={
-                locale === "id" ? "Kontrol video hero" : "Hero video controls"
-              }
-            >
-              <button
-                type="button"
-                onClick={toggleHeroVideoPlayback}
+            <div className="hero-media-footer">
+              <div
+                className="hero-video-controls"
+                role="group"
                 aria-label={
-                  heroVideoPlaying
-                    ? locale === "id"
-                      ? "Jeda video"
-                      : "Pause video"
-                    : locale === "id"
-                      ? "Putar video"
-                      : "Play video"
-                }
-                title={
-                  heroVideoPlaying
-                    ? locale === "id"
-                      ? "Jeda video"
-                      : "Pause video"
-                    : locale === "id"
-                      ? "Putar video"
-                      : "Play video"
+                  locale === "id" ? "Kontrol video hero" : "Hero video controls"
                 }
               >
-                {heroVideoPlaying ? (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M8 6v12M16 6v12" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m9 6 9 6-9 6Z" />
-                  </svg>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={toggleHeroVideoSound}
-                aria-label={
-                  heroVideoMuted
-                    ? locale === "id"
-                      ? "Aktifkan suara"
-                      : "Turn sound on"
-                    : locale === "id"
-                      ? "Matikan suara"
-                      : "Mute video"
-                }
-                title={
-                  heroVideoMuted
-                    ? locale === "id"
-                      ? "Aktifkan suara"
-                      : "Turn sound on"
-                    : locale === "id"
-                      ? "Matikan suara"
-                      : "Mute video"
-                }
-              >
-                {heroVideoMuted ? (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M11 7 7.5 10H4v4h3.5l3.5 3Z" />
-                    <path d="m16 9 5 5M21 9l-5 5" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M11 7 7.5 10H4v4h3.5l3.5 3Z" />
-                    <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10" />
-                  </svg>
-                )}
-              </button>
+                <button
+                  type="button"
+                  onClick={toggleHeroVideoPlayback}
+                  aria-label={
+                    heroVideoPlaying
+                      ? locale === "id"
+                        ? "Jeda video"
+                        : "Pause video"
+                      : locale === "id"
+                        ? "Putar video"
+                        : "Play video"
+                  }
+                  title={
+                    heroVideoPlaying
+                      ? locale === "id"
+                        ? "Jeda video"
+                        : "Pause video"
+                      : locale === "id"
+                        ? "Putar video"
+                        : "Play video"
+                  }
+                >
+                  {heroVideoPlaying ? (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M8 6v12M16 6v12" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m9 6 9 6-9 6Z" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleHeroVideoSound}
+                  aria-label={
+                    heroVideoMuted
+                      ? locale === "id"
+                        ? "Aktifkan suara"
+                        : "Turn sound on"
+                      : locale === "id"
+                        ? "Matikan suara"
+                        : "Mute video"
+                  }
+                  title={
+                    heroVideoMuted
+                      ? locale === "id"
+                        ? "Aktifkan suara"
+                        : "Turn sound on"
+                      : locale === "id"
+                        ? "Matikan suara"
+                        : "Mute video"
+                  }
+                >
+                  {heroVideoMuted ? (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M11 7 7.5 10H4v4h3.5l3.5 3Z" />
+                      <path d="m16 9 5 5M21 9l-5 5" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M11 7 7.5 10H4v4h3.5l3.5 3Z" />
+                      <path d="M15 9.5a4 4 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
           ) : null}
-          <div className="hero-photo-label">
-            <span>{heroImageLabel || "KOOKA Residence"}</span>
-            <strong>
-              {locale === "id"
-                ? "Tempat singgah tenang di Surabaya"
-                : "A quiet stay in Surabaya"}
-            </strong>
-          </div>
         </div>
         <div className="hero-copy">
           <p className="eyebrow">{landingValue(hero, "eyebrow")}</p>
@@ -1127,7 +1118,13 @@ export default function LandingPage({
               />
             </h2>
           </div>
-          <span className="quiet-note">Urban Tropical Retreat</span>
+          <div className="gallery-section-actions">
+            <span className="quiet-note">Urban Tropical Retreat</span>
+            <a className="gallery-view-all" href={`/gallery?locale=${locale}`}>
+              {locale === "id" ? "Lihat semua galeri" : "Explore the gallery"}
+              <span aria-hidden="true">↗</span>
+            </a>
+          </div>
         </div>
         <div className="editorial-grid">
           {[0, 1, 2].map((index) => (
@@ -1248,7 +1245,9 @@ export default function LandingPage({
         <div>
           <strong>{locale === "id" ? "Jelajahi" : "Explore"}</strong>
           <a href="#rooms">{locale === "id" ? "Kamar" : "Rooms"}</a>
-          <a href="#gallery">{locale === "id" ? "Galeri" : "Gallery"}</a>
+          <a href={`/gallery?locale=${locale}`}>
+            {locale === "id" ? "Galeri" : "Gallery"}
+          </a>
           <a href="#location">{locale === "id" ? "Lokasi" : "Location"}</a>
         </div>
         <div>

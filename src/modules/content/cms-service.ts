@@ -44,6 +44,7 @@ import type {
   LandingMedia,
   LandingRoomType,
   LandingSection,
+  PublicGalleryMedia,
   PublicLandingData,
   PublicLocale,
 } from "./contracts";
@@ -434,6 +435,57 @@ async function readPublicRoomTypes(params: {
           sortOrder: media.sortOrder,
         })),
     };
+  });
+}
+
+export async function getPublicGalleryMedia(params: {
+  propertyId: string;
+  locale: PublicLocale;
+}): Promise<PublicGalleryMedia[]> {
+  const rows = await getDatabase()
+    .select({
+      id: mediaAssets.id,
+      mediaType: mediaAssets.mediaType,
+      altId: mediaAssets.altId,
+      altEn: mediaAssets.altEn,
+      captionId: mediaAssets.captionId,
+      captionEn: mediaAssets.captionEn,
+      createdAt: mediaAssets.createdAt,
+    })
+    .from(mediaAssets)
+    .innerJoin(storedFiles, eq(storedFiles.id, mediaAssets.fileId))
+    .where(
+      and(
+        eq(mediaAssets.propertyId, params.propertyId),
+        eq(mediaAssets.status, "PUBLISHED"),
+        eq(mediaAssets.authenticPropertyMedia, true),
+        eq(storedFiles.scanStatus, "CLEAN"),
+        isNull(storedFiles.purgedAt),
+      ),
+    )
+    .orderBy(desc(mediaAssets.createdAt));
+
+  return rows.flatMap((row, index) => {
+    if (row.mediaType !== "IMAGE" && row.mediaType !== "VIDEO") return [];
+    const alt =
+      (params.locale === "en" ? row.altEn : row.altId) ??
+      row.altId ??
+      row.altEn ??
+      "KOOKA Residence";
+    return [
+      {
+        id: row.id,
+        mediaType: row.mediaType,
+        url: `/api/content/media/${row.id}`,
+        alt,
+        caption:
+          (params.locale === "en" ? row.captionEn : row.captionId) ??
+          row.captionId ??
+          row.captionEn ??
+          alt,
+        sortOrder: index,
+      },
+    ];
   });
 }
 

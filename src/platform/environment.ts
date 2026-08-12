@@ -10,6 +10,17 @@ export const applicationEnvironmentSchema = z
   .object({
     APP_ENV: z.enum(["development", "test", "uat", "production"]),
     APP_URL: z.string().url(),
+    SITE_MAINTENANCE_MODE: z.string().optional(),
+    MAINTENANCE_PREVIEW_SECRET: z
+      .string()
+      .min(8, "MAINTENANCE_PREVIEW_SECRET must be at least 8 characters")
+      .optional(),
+    MAINTENANCE_PREVIEW_DURATION_HOURS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(168)
+      .default(8),
     BETTER_AUTH_SECRET: z
       .string()
       .min(32, "BETTER_AUTH_SECRET must be at least 32 characters"),

@@ -103,11 +103,26 @@ Minimal yang harus diganti:
 - `SMTP_PASSWORD`
 - `SMTP_FROM`
 
-Untuk membuat secret:
+Jika `SITE_MAINTENANCE_MODE=on` dan developer perlu melihat website production
+sebelum dibuka ke publik, isi juga:
+
+- `MAINTENANCE_PREVIEW_SECRET` dengan kata sandi tersendiri, minimal 8 karakter
+- `MAINTENANCE_PREVIEW_DURATION_HOURS` (default `8`)
+
+Setelah deploy, buka `https://kookaresidencesby.com/maintenance-preview`, masukkan
+secret tersebut, lalu browser akan memperoleh akses sementara ke website asli.
+Pengunjung lain tetap melihat halaman maintenance. Gunakan tombol **Exit preview**
+untuk menghapus akses lebih awal.
+
+Nilainya boleh berupa kata sandi pilihan Anda, misalnya:
 
 ```bash
-openssl rand -base64 32
+MAINTENANCE_PREVIEW_SECRET=Kooka2026
 ```
+
+Gunakan kata sandi yang tidak dipakai pada akun lain. Nilai ini tidak harus
+berformat Base64. Perintah `openssl rand -base64 32` tetap dapat digunakan jika
+Anda menginginkan kata sandi acak yang lebih kuat.
 
 Gunakan hasil berbeda untuk `BETTER_AUTH_SECRET` dan `DATA_ENCRYPTION_KEY`.
 

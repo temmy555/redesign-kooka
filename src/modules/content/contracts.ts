@@ -21,6 +21,10 @@ export interface LandingMedia {
   sortOrder: number;
 }
 
+export interface PublicGalleryMedia extends LandingMedia {
+  mediaType: "IMAGE" | "VIDEO";
+}
+
 export interface LandingAmenity {
   code: string;
   name: string;
