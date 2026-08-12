@@ -7,6 +7,7 @@ import {
   MAINTENANCE_PREVIEW_COOKIE,
   verifyMaintenancePreviewPassword,
 } from "../../../../src/platform/maintenance-preview";
+import { isTrustedStaffMutation } from "../../../../src/platform/request-security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -24,14 +25,13 @@ function clientKey(request: Request): string {
 }
 
 function isTrustedRequest(request: Request): boolean {
-  if (request.headers.get("sec-fetch-site") === "cross-site") return false;
-  const suppliedOrigin = request.headers.get("origin");
-  if (!suppliedOrigin) return true;
-  try {
-    return new URL(suppliedOrigin).origin === new URL(request.url).origin;
-  } catch {
-    return false;
-  }
+  return isTrustedStaffMutation({
+    method: request.method,
+    requestOrigin: new URL(request.url).origin,
+    configuredOrigin: process.env.APP_URL,
+    originHeader: request.headers.get("origin"),
+    secFetchSite: request.headers.get("sec-fetch-site"),
+  });
 }
 
 function isLimited(key: string, now: number): boolean {
@@ -52,8 +52,17 @@ function recordFailure(key: string, now: number) {
   current.count += 1;
 }
 
+function publicUrl(pathname: string, request: Request): URL {
+  const configuredUrl = process.env.APP_URL?.trim();
+  try {
+    return new URL(pathname, configuredUrl || request.url);
+  } catch {
+    return new URL(pathname, request.url);
+  }
+}
+
 function redirectTo(request: Request, error?: "invalid" | "limited") {
-  const url = new URL("/maintenance-preview", request.url);
+  const url = publicUrl("/maintenance-preview", request);
   if (error) url.searchParams.set("error", error);
   return NextResponse.redirect(url, 303);
 }
@@ -87,7 +96,7 @@ export async function POST(request: Request) {
 
   attempts.delete(key);
   const { token, expiresAt } = createMaintenancePreviewToken(now);
-  const response = NextResponse.redirect(new URL("/", request.url), 303);
+  const response = NextResponse.redirect(publicUrl("/", request), 303);
   response.cookies.set(MAINTENANCE_PREVIEW_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { POST as loginToMaintenancePreview } from "../../app/api/maintenance-preview/login/route";
 import { proxy } from "../../proxy";
 import {
   createMaintenancePreviewToken,
@@ -17,6 +18,7 @@ const previewSecret = "Kooka123";
 describe("maintenance production preview", () => {
   beforeEach(() => {
     process.env.SITE_MAINTENANCE_MODE = "on";
+    process.env.APP_URL = "https://kookaresidencesby.com";
     process.env.MAINTENANCE_PREVIEW_SECRET = previewSecret;
     process.env.MAINTENANCE_PREVIEW_DURATION_HOURS = "8";
   });
@@ -68,5 +70,45 @@ describe("maintenance production preview", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("accepts the configured production origin behind a reverse proxy", async () => {
+    const response = await loginToMaintenancePreview(
+      new Request("http://127.0.0.1:3000/api/maintenance-preview/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://kookaresidencesby.com",
+          "sec-fetch-site": "same-origin",
+          "x-real-ip": "203.0.113.10",
+        },
+        body: new URLSearchParams({ password: previewSecret }),
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://kookaresidencesby.com/",
+    );
+    expect(response.headers.get("set-cookie")).toContain(
+      `${MAINTENANCE_PREVIEW_COOKIE}=`,
+    );
+  });
+
+  it("continues to reject a cross-site preview login", async () => {
+    const response = await loginToMaintenancePreview(
+      new Request("http://127.0.0.1:3000/api/maintenance-preview/login", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://attacker.example",
+          "sec-fetch-site": "cross-site",
+          "x-real-ip": "203.0.113.11",
+        },
+        body: new URLSearchParams({ password: previewSecret }),
+      }),
+    );
+
+    expect(response.status).toBe(404);
   });
 });
