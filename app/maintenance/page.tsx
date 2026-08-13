@@ -1,7 +1,6 @@
 export default function MaintenancePage() {
   const title =
-    process.env.SITE_MAINTENANCE_TITLE ??
-    "Website Under Maintenance";
+    process.env.SITE_MAINTENANCE_TITLE ?? "Website Under Maintenance";
   const message =
     process.env.SITE_MAINTENANCE_MESSAGE ??
     "Sorry, KOOKA Residence booking services and website are currently undergoing maintenance. We will be back online as soon as possible.";
@@ -65,7 +64,7 @@ export default function MaintenancePage() {
         </p>
         {expected ? (
           <p style={{ margin: 0, color: "#374151" }}>
-            Diperkirakan aktif kembali: <strong>{expected}</strong>
+            Expected to be available again: <strong>{expected}</strong>
           </p>
         ) : (
           <p style={{ margin: 0, color: "#374151" }}>
