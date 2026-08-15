@@ -177,22 +177,24 @@ export function buildPublicGalleryItems(
     });
   }
 
-  const heroVideo = value(hero, "heroVideoUrl");
+  const heroVideo = data.heroVideo;
   if (heroVideo) {
     add({
       id: "hero-video",
       kind: "VIDEO",
       category: "VIDEOS",
-      src: heroVideo,
+      src: heroVideo.url,
       poster: authenticImage(heroImage),
       alt:
-        locale === "id"
+        heroVideo.alt ||
+        (locale === "id"
           ? "Video suasana KOOKA Residence"
-          : "KOOKA Residence atmosphere video",
+          : "KOOKA Residence atmosphere video"),
       caption:
-        locale === "id"
+        heroVideo.caption ||
+        (locale === "id"
           ? "Suasana tenang di KOOKA Residence"
-          : "A quiet moment at KOOKA Residence",
+          : "A quiet moment at KOOKA Residence"),
     });
   }
 

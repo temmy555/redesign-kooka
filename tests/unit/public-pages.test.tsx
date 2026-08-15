@@ -216,11 +216,9 @@ describe("Batch 4 public pages", () => {
     ];
     const html = renderToStaticMarkup(<LandingPage initialData={empty} />);
     expect(html).toContain("Unpublished room media");
-    expect(html).toContain(
-      "%2Fimages%2Fagoda-kooka%2Froom-mezzanine-guestroom.jpg",
-    );
-    expect(html).toContain("%2Fimages%2Fagoda-kooka%2Fproperty-entrance.jpg");
-    expect(html).toContain("%2Fimages%2Fagoda-kooka%2Ffacility-garden.jpg");
+    expect(html).toContain("%2Fimages%2Fkooka-assets%2Fark-05044.jpg");
+    expect(html).toContain("%2Fimages%2Fkooka-assets%2Fark-05080.jpg");
+    expect(html).toContain("%2Fimages%2Fkooka-assets%2Fark-05070.jpg");
     expect(html).toContain("Surabaya");
     expect(html).toContain("Check availability");
   });

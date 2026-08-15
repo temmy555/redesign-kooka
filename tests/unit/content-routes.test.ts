@@ -16,8 +16,12 @@ const mocks = vi.hoisted(() => ({
   uploadCmsMedia: vi.fn(),
   publishCmsMedia: vi.fn(),
   archiveCmsMedia: vi.fn(),
+  deleteCmsMedia: vi.fn(),
   linkCmsMedia: vi.fn(),
   setRoomTypeGallery: vi.fn(),
+  setLandingHeroVideo: vi.fn(),
+  setLandingSectionMedia: vi.fn(),
+  updateCmsMediaMetadata: vi.fn(),
 }));
 
 vi.mock("../../src/platform/session", () => ({
@@ -44,8 +48,12 @@ vi.mock("../../src/modules/content/media-service", () => ({
   uploadCmsMedia: mocks.uploadCmsMedia,
   publishCmsMedia: mocks.publishCmsMedia,
   archiveCmsMedia: mocks.archiveCmsMedia,
+  deleteCmsMedia: mocks.deleteCmsMedia,
   linkCmsMedia: mocks.linkCmsMedia,
   setRoomTypeGallery: mocks.setRoomTypeGallery,
+  setLandingHeroVideo: mocks.setLandingHeroVideo,
+  setLandingSectionMedia: mocks.setLandingSectionMedia,
+  updateCmsMediaMetadata: mocks.updateCmsMediaMetadata,
 }));
 
 import { GET as landingGet } from "../../app/api/content/landing/route";
@@ -240,6 +248,7 @@ describe("Batch 4 content routes", () => {
   it.each([
     ["PUBLISH", "publishCmsMedia"],
     ["ARCHIVE", "archiveCmsMedia"],
+    ["DELETE", "deleteCmsMedia"],
   ])("dispatches media action %s", async (action, service) => {
     const response = await mediaPatch(
       jsonRequest(
@@ -295,6 +304,71 @@ describe("Batch 4 content routes", () => {
         propertyId: U2,
         roomTypeId: U2,
         assetIds: [U1, U2],
+      }),
+    );
+  });
+
+  it("sets a published video as the landing hero", async () => {
+    const response = await mediaPatch(
+      jsonRequest(
+        "/api/staff/admin/media",
+        { action: "SET_LANDING_HERO_VIDEO", assetId: U1 },
+        "PATCH",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.setLandingHeroVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: U1,
+        propertyId: U2,
+      }),
+    );
+  });
+
+  it("sets ordered photos for a landing section", async () => {
+    const response = await mediaPatch(
+      jsonRequest(
+        "/api/staff/admin/media",
+        {
+          action: "SET_LANDING_SECTION_MEDIA",
+          section: "experience",
+          assetIds: [U1, U2],
+        },
+        "PATCH",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.setLandingSectionMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        propertyId: U2,
+        section: "experience",
+        assetIds: [U1, U2],
+      }),
+    );
+  });
+
+  it("updates bilingual landing image labels", async () => {
+    const response = await mediaPatch(
+      jsonRequest(
+        "/api/staff/admin/media",
+        {
+          action: "UPDATE_METADATA",
+          assetId: U1,
+          title: "Courtyard",
+          altId: "Halaman hijau KOOKA",
+          altEn: "KOOKA leafy courtyard",
+          captionId: "Halaman hijau",
+          captionEn: "Leafy courtyard",
+        },
+        "PATCH",
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.updateCmsMediaMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: U1,
+        captionId: "Halaman hijau",
+        captionEn: "Leafy courtyard",
       }),
     );
   });

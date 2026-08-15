@@ -3,10 +3,14 @@ import { z } from "zod";
 
 import {
   archiveCmsMedia,
+  deleteCmsMedia,
   getMediaOverview,
   linkCmsMedia,
   publishCmsMedia,
+  setLandingHeroVideo,
+  setLandingSectionMedia,
   setRoomTypeGallery,
+  updateCmsMediaMetadata,
   uploadCmsMedia,
 } from "../../../../../src/modules/content/media-service";
 import { AuthorizationError } from "../../../../../src/platform/authorization";
@@ -29,6 +33,11 @@ const mediaActionSchema = z.discriminatedUnion("action", [
     reason: z.string().trim().min(3).max(500),
   }),
   z.object({
+    action: z.literal("DELETE"),
+    assetId: z.string().uuid(),
+    reason: z.string().trim().min(3).max(500),
+  }),
+  z.object({
     action: z.literal("LINK"),
     assetId: z.string().uuid(),
     usageType: z.enum([
@@ -43,6 +52,24 @@ const mediaActionSchema = z.discriminatedUnion("action", [
     action: z.literal("SET_ROOM_GALLERY"),
     roomTypeId: z.string().uuid(),
     assetIds: z.array(z.string().uuid()).min(1).max(20),
+  }),
+  z.object({
+    action: z.literal("SET_LANDING_HERO_VIDEO"),
+    assetId: z.string().uuid(),
+  }),
+  z.object({
+    action: z.literal("SET_LANDING_SECTION_MEDIA"),
+    section: z.enum(["experience", "gallery"]),
+    assetIds: z.array(z.string().uuid()).max(3),
+  }),
+  z.object({
+    action: z.literal("UPDATE_METADATA"),
+    assetId: z.string().uuid(),
+    title: z.string().trim().max(200).optional(),
+    altId: z.string().trim().min(1).max(1_000),
+    altEn: z.string().trim().min(1).max(1_000),
+    captionId: z.string().trim().max(1_000).optional(),
+    captionEn: z.string().trim().max(1_000).optional(),
   }),
 ]);
 
@@ -82,7 +109,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) {
-      throw new AppError("VALIDATION_ERROR", "Image file is required");
+      throw new AppError("VALIDATION_ERROR", "Media file is required");
     }
     const authentic = form.get("authenticPropertyMedia") === "true";
     const result = await uploadCmsMedia({
@@ -120,9 +147,29 @@ export async function PATCH(request: Request) {
         await archiveCmsMedia({ ...requestContext, ...body }),
       );
     }
+    if (body.action === "DELETE") {
+      return NextResponse.json(
+        await deleteCmsMedia({ ...requestContext, ...body }),
+      );
+    }
     if (body.action === "SET_ROOM_GALLERY") {
       return NextResponse.json(
         await setRoomTypeGallery({ ...requestContext, ...body }),
+      );
+    }
+    if (body.action === "SET_LANDING_HERO_VIDEO") {
+      return NextResponse.json(
+        await setLandingHeroVideo({ ...requestContext, ...body }),
+      );
+    }
+    if (body.action === "SET_LANDING_SECTION_MEDIA") {
+      return NextResponse.json(
+        await setLandingSectionMedia({ ...requestContext, ...body }),
+      );
+    }
+    if (body.action === "UPDATE_METADATA") {
+      return NextResponse.json(
+        await updateCmsMediaMetadata({ ...requestContext, ...body }),
       );
     }
     return NextResponse.json(

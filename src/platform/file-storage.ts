@@ -27,10 +27,15 @@ import { getLogger } from "./logger";
 
 const ALLOWED_MIME_TYPES: Record<
   string,
-  { extension: string; matchesSignature: (bytes: Buffer) => boolean }
+  {
+    extension: string;
+    maxBytes: number;
+    matchesSignature: (bytes: Buffer) => boolean;
+  }
 > = {
   "image/jpeg": {
     extension: ".jpg",
+    maxBytes: 15 * 1024 * 1024,
     matchesSignature: (bytes) =>
       bytes.length >= 3 &&
       bytes[0] === 0xff &&
@@ -39,6 +44,7 @@ const ALLOWED_MIME_TYPES: Record<
   },
   "image/png": {
     extension: ".png",
+    maxBytes: 15 * 1024 * 1024,
     matchesSignature: (bytes) =>
       bytes
         .subarray(0, 8)
@@ -46,17 +52,17 @@ const ALLOWED_MIME_TYPES: Record<
   },
   "application/pdf": {
     extension: ".pdf",
+    maxBytes: 15 * 1024 * 1024,
     matchesSignature: (bytes) =>
       bytes.subarray(0, 5).toString("ascii") === "%PDF-",
   },
+  "video/mp4": {
+    extension: ".mp4",
+    maxBytes: 24 * 1024 * 1024,
+    matchesSignature: (bytes) =>
+      bytes.length >= 12 && bytes.subarray(4, 8).toString("ascii") === "ftyp",
+  },
 };
-
-/**
- * Conservative default; domain modules with a genuine need for larger
- * uploads (e.g. a scanned multi-page PDF) can be revisited when that
- * feature is actually built rather than guessing a limit now.
- */
-const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_IMAGE_DIMENSION = 12_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const PNG_METADATA_CHUNKS = new Set(["eXIf", "iTXt", "tEXt", "tIME", "zTXt"]);
@@ -221,9 +227,9 @@ function validateUploadCandidate(
   if (bytes.byteLength === 0) {
     throw new InvalidFileError("Uploaded file is empty");
   }
-  if (bytes.byteLength > MAX_FILE_BYTES) {
+  if (bytes.byteLength > allowed.maxBytes) {
     throw new InvalidFileError(
-      `Uploaded file exceeds the ${MAX_FILE_BYTES} byte limit`,
+      `Uploaded file exceeds the ${allowed.maxBytes} byte limit`,
     );
   }
   if (!allowed.matchesSignature(bytes)) {

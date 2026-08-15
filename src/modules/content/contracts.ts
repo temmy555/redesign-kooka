@@ -25,6 +25,10 @@ export interface PublicGalleryMedia extends LandingMedia {
   mediaType: "IMAGE" | "VIDEO";
 }
 
+export interface LandingHeroVideo extends LandingMedia {
+  mimeType: "video/mp4";
+}
+
 export interface LandingAmenity {
   code: string;
   name: string;
@@ -85,6 +89,7 @@ export interface PublicLandingData {
     address?: string | null;
     baseCurrency: "IDR";
   };
+  heroVideo?: LandingHeroVideo | null;
   sections: LandingSection[];
   rooms: LandingRoomType[];
   menu?: PublicMenuData;

@@ -42,6 +42,7 @@ import type {
   ContentSectionDraftInput,
   ContentStaffSession,
   LandingMedia,
+  LandingHeroVideo,
   LandingRoomType,
   LandingSection,
   PublicGalleryMedia,
@@ -489,6 +490,115 @@ export async function getPublicGalleryMedia(params: {
   });
 }
 
+async function readLandingSectionMedia(params: {
+  propertyId: string;
+  locale: PublicLocale;
+}): Promise<Partial<Record<"experience" | "gallery", LandingMedia[]>>> {
+  const rows = await getDatabase()
+    .select({
+      id: mediaAssets.id,
+      usageType: mediaUsages.usageType,
+      altId: mediaAssets.altId,
+      altEn: mediaAssets.altEn,
+      captionId: mediaAssets.captionId,
+      captionEn: mediaAssets.captionEn,
+      sortOrder: mediaUsages.sortOrder,
+    })
+    .from(mediaUsages)
+    .innerJoin(mediaAssets, eq(mediaAssets.id, mediaUsages.mediaAssetId))
+    .innerJoin(storedFiles, eq(storedFiles.id, mediaAssets.fileId))
+    .where(
+      and(
+        inArray(mediaUsages.usageType, [
+          "LANDING_EXPERIENCE_MEDIA",
+          "LANDING_GALLERY_MEDIA",
+        ]),
+        eq(mediaUsages.targetId, params.propertyId),
+        eq(mediaAssets.propertyId, params.propertyId),
+        eq(mediaAssets.mediaType, "IMAGE"),
+        eq(mediaAssets.status, "PUBLISHED"),
+        eq(mediaAssets.authenticPropertyMedia, true),
+        eq(storedFiles.scanStatus, "CLEAN"),
+        isNull(storedFiles.purgedAt),
+      ),
+    )
+    .orderBy(asc(mediaUsages.sortOrder));
+
+  const result: Partial<Record<"experience" | "gallery", LandingMedia[]>> = {};
+  for (const row of rows) {
+    const section =
+      row.usageType === "LANDING_EXPERIENCE_MEDIA" ? "experience" : "gallery";
+    const alt =
+      (params.locale === "en" ? row.altEn : row.altId) ??
+      row.altId ??
+      row.altEn ??
+      "KOOKA Residence Surabaya";
+    (result[section] ??= []).push({
+      id: row.id,
+      url: `/api/content/media/${row.id}`,
+      alt,
+      caption:
+        (params.locale === "en" ? row.captionEn : row.captionId) ??
+        row.captionId ??
+        row.captionEn ??
+        null,
+      sortOrder: row.sortOrder,
+    });
+  }
+  return result;
+}
+
+async function readLandingHeroVideo(params: {
+  propertyId: string;
+  locale: PublicLocale;
+}): Promise<LandingHeroVideo | null> {
+  const [row] = await getDatabase()
+    .select({
+      id: mediaAssets.id,
+      mimeType: storedFiles.mimeType,
+      altId: mediaAssets.altId,
+      altEn: mediaAssets.altEn,
+      captionId: mediaAssets.captionId,
+      captionEn: mediaAssets.captionEn,
+      sortOrder: mediaUsages.sortOrder,
+    })
+    .from(mediaUsages)
+    .innerJoin(mediaAssets, eq(mediaAssets.id, mediaUsages.mediaAssetId))
+    .innerJoin(storedFiles, eq(storedFiles.id, mediaAssets.fileId))
+    .where(
+      and(
+        eq(mediaUsages.usageType, "LANDING_HERO_VIDEO"),
+        eq(mediaUsages.targetId, params.propertyId),
+        eq(mediaAssets.propertyId, params.propertyId),
+        eq(mediaAssets.mediaType, "VIDEO"),
+        eq(mediaAssets.status, "PUBLISHED"),
+        eq(mediaAssets.authenticPropertyMedia, true),
+        eq(storedFiles.mimeType, "video/mp4"),
+        eq(storedFiles.scanStatus, "CLEAN"),
+        isNull(storedFiles.purgedAt),
+      ),
+    )
+    .orderBy(asc(mediaUsages.sortOrder))
+    .limit(1);
+  if (!row || row.mimeType !== "video/mp4") return null;
+  const alt =
+    (params.locale === "en" ? row.altEn : row.altId) ??
+    row.altId ??
+    row.altEn ??
+    "KOOKA Residence Surabaya";
+  return {
+    id: row.id,
+    url: `/api/content/media/${row.id}`,
+    mimeType: "video/mp4",
+    alt,
+    caption:
+      (params.locale === "en" ? row.captionEn : row.captionId) ??
+      row.captionId ??
+      row.captionEn,
+    sortOrder: row.sortOrder,
+  };
+}
+
 export async function getPublicLandingPage(params: {
   propertyId: string;
   locale: PublicLocale;
@@ -521,16 +631,34 @@ export async function getPublicLandingPage(params: {
     versionId: params.versionId,
     now,
   });
-  const [sections, rooms] = await Promise.all([
-    version
-      ? readCmsSections(version.versionId, params.locale)
-      : Promise.resolve(approvedBaselineSections(params.locale)),
-    readPublicRoomTypes({
-      propertyId: params.propertyId,
-      locale: params.locale,
-      now,
-    }),
-  ]);
+  const [baseSections, rooms, heroVideo, landingSectionMedia] =
+    await Promise.all([
+      version
+        ? readCmsSections(version.versionId, params.locale)
+        : Promise.resolve(approvedBaselineSections(params.locale)),
+      readPublicRoomTypes({
+        propertyId: params.propertyId,
+        locale: params.locale,
+        now,
+      }),
+      readLandingHeroVideo({
+        propertyId: params.propertyId,
+        locale: params.locale,
+      }),
+      readLandingSectionMedia({
+        propertyId: params.propertyId,
+        locale: params.locale,
+      }),
+    ]);
+  const sections = baseSections.map((section) => {
+    if (section.key !== "experience" && section.key !== "gallery") {
+      return section;
+    }
+    const configuredMedia = landingSectionMedia[section.key];
+    return configuredMedia?.length
+      ? { ...section, media: configuredMedia }
+      : section;
+  });
 
   return {
     source: version ? "PUBLISHED_CMS" : "APPROVED_BASELINE",
@@ -541,6 +669,7 @@ export async function getPublicLandingPage(params: {
       address: property.address,
       baseCurrency: "IDR",
     },
+    heroVideo,
     sections,
     rooms,
     generatedAt: now.toISOString(),

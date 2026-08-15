@@ -16,7 +16,6 @@ const baselineSections: LandingSection[] = [
       bookingNote:
         "Pesan langsung untuk pengalaman menginap yang lebih personal",
       imageUrl: "/images/kooka-assets/ark-05080.jpg",
-      heroVideoUrl: "/videos/kooka-assets/kooka-morning-vibes.mov",
       imageAlt: "Pintu masuk KOOKA Residence Surabaya",
       imageLabel: "KOOKA Residence",
       sectionCaption: "Foto dan video dari aset terbaru KOOKA",
@@ -155,7 +154,6 @@ const englishByKey: Record<string, Record<string, unknown>> = {
     body: "Rest in our leafy garden home. Enjoy green surroundings and personal spaces while staying close to the city’s essentials.",
     bookingNote: "Book direct for a more personal stay",
     imageUrl: "/images/kooka-assets/ark-05080.jpg",
-    heroVideoUrl: "/videos/kooka-assets/kooka-morning-vibes.mov",
     imageAlt: "Entrance to KOOKA Residence Surabaya",
     imageLabel: "KOOKA Residence",
     sectionCaption: "Photos and video from latest KOOKA assets",

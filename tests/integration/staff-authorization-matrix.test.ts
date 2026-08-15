@@ -21,6 +21,6 @@ describe("staff authorization matrix", () => {
   it("keeps all staff mutation routes behind the central origin guard", async () => {
     const source = await readFile(join(process.cwd(), "proxy.ts"), "utf8");
     expect(source).toContain("isTrustedStaffMutation");
-    expect(source).toContain("/api/staff/:path*");
+    expect(source).toContain('pathname.startsWith("/api/staff/")');
   });
 });

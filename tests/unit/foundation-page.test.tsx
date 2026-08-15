@@ -1,5 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/headers", () => ({
+  cookies: vi.fn().mockResolvedValue({ get: vi.fn(() => undefined) }),
+}));
 
 import RootLayout, { metadata } from "../../app/layout";
 import HomePage from "../../app/page";
@@ -9,7 +13,7 @@ describe("canonical application foundation", () => {
     const html = renderToStaticMarkup(await HomePage());
 
     expect(html).toContain("Urban Tropical Retreat");
-    expect(html).toContain("Hunian tenang");
+    expect(html).toContain("A calm, <em>comfortable stay");
     expect(html).toContain("IDR");
   });
 
@@ -22,11 +26,9 @@ describe("canonical application foundation", () => {
     expect(html).toContain("Get directions");
   });
 
-  it("keeps Indonesian as the initial document language", () => {
+  it("keeps the configured document language and metadata", async () => {
     const html = renderToStaticMarkup(
-      <RootLayout>
-        <main>KOOKA</main>
-      </RootLayout>,
+      await RootLayout({ children: <main>KOOKA</main> }),
     );
 
     expect(html).toContain('<html lang="id"');

@@ -42,11 +42,13 @@ import {
 import { approvedBaselineLanding } from "../../src/modules/content/default-content";
 import {
   archiveCmsMedia,
+  deleteCmsMedia,
   getMediaOverview,
   linkCmsMedia,
   publishCmsMedia,
   readPublishedMedia,
   setRoomTypeGallery,
+  setLandingHeroVideo,
   uploadCmsMedia,
 } from "../../src/modules/content/media-service";
 
@@ -363,6 +365,8 @@ describe("Batch 4 content service safeguards", () => {
     const asset = (id: string) => ({
       id,
       fileId: U2,
+      mediaType: "IMAGE",
+      mimeType: "image/jpeg",
       status: "PUBLISHED",
       authenticPropertyMedia: true,
       rightsSource: "KOOKA",
@@ -436,6 +440,8 @@ describe("Batch 4 content service safeguards", () => {
           maximumExtraBeds: 1,
         },
       ],
+      [],
+      [],
       [
         {
           contentSectionId: U1,
@@ -503,6 +509,41 @@ describe("Batch 4 content service safeguards", () => {
     });
     expect(result.rooms[0]?.amenities[0]?.name).toBe("Wi-Fi");
     expect(result.rooms[0]?.media[0]?.url).toContain(U2);
+    expect(result.heroVideo).toBeNull();
+  });
+
+  it("replaces the active landing hero with a verified MP4", async () => {
+    const db = queuedDatabase([
+      [
+        {
+          id: U1,
+          fileId: U2,
+          mediaType: "VIDEO",
+          mimeType: "video/mp4",
+          status: "PUBLISHED",
+          authenticPropertyMedia: true,
+          rightsSource: "Owned by KOOKA",
+          altId: "Suasana KOOKA",
+          altEn: "The KOOKA atmosphere",
+          scanStatus: "CLEAN",
+          purgedAt: null,
+        },
+      ],
+    ]);
+    mocks.getDatabase.mockReturnValue(db);
+    await expect(
+      setLandingHeroVideo({
+        session,
+        propertyId: U2,
+        assetId: U1,
+      }),
+    ).resolves.toEqual({ assetId: U1, status: "ACTIVE" });
+    expect(db.delete).toHaveBeenCalledOnce();
+    expect(db.insert).toHaveBeenCalledOnce();
+    expect(mocks.recordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "cms.media.hero_video.set" }),
+      db,
+    );
   });
 
   it("uses the approved baseline when no CMS revision is published", async () => {
@@ -770,6 +811,50 @@ describe("Batch 4 content service safeguards", () => {
     ).resolves.toMatchObject({ status: "ARCHIVED" });
   });
 
+  it("deletes unused CMS media from the gallery and stored files", async () => {
+    const mediaRow = {
+      id: U2,
+      fileId: U1,
+      status: "PUBLISHED",
+      mediaType: "IMAGE",
+      mimeType: "image/jpeg",
+    };
+    mocks.getDatabase.mockReturnValue(queuedDatabase([[mediaRow], []]));
+
+    await expect(
+      deleteCmsMedia({
+        session,
+        propertyId: U2,
+        assetId: U2,
+        reason: "Remove outdated image",
+      }),
+    ).resolves.toMatchObject({ status: "DELETED" });
+    expect(mocks.purgeStoredFile).toHaveBeenCalledWith(U1, U1);
+  });
+
+  it("prevents deleting CMS media that is still used by the website", async () => {
+    const mediaRow = {
+      id: U2,
+      fileId: U1,
+      status: "PUBLISHED",
+      mediaType: "IMAGE",
+      mimeType: "image/jpeg",
+    };
+    mocks.getDatabase.mockReturnValue(
+      queuedDatabase([[mediaRow], [{ usageType: "LANDING_GALLERY_MEDIA" }]]),
+    );
+
+    await expect(
+      deleteCmsMedia({
+        session,
+        propertyId: U2,
+        assetId: U2,
+        reason: "Remove outdated image",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(mocks.purgeStoredFile).not.toHaveBeenCalled();
+  });
+
   it("purges CMS media when file inspection rejects the upload", async () => {
     mocks.saveStoredFile.mockResolvedValue({
       id: U1,
@@ -906,7 +991,7 @@ describe("Batch 4 content service safeguards", () => {
     });
   });
 
-  it("validates CMS upload metadata and Phase 1 image types", async () => {
+  it("validates CMS upload metadata and supported media types", async () => {
     await expect(
       uploadCmsMedia({
         session,

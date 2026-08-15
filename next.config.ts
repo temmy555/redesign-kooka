@@ -9,6 +9,11 @@ const nextConfig: NextConfig = {
   images: {
     qualities: [75],
   },
+  experimental: {
+    // Upload media melewati proxy.ts sebelum mencapai route handler. Beri ruang
+    // untuk file maksimum 24 MB beserta metadata multipart request-nya.
+    proxyClientMaxBodySize: "25mb",
+  },
   poweredByHeader: false,
   reactStrictMode: true,
   async headers() {

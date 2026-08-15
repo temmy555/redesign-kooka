@@ -7,8 +7,17 @@ import {
 } from "../../src/modules/content/public-gallery";
 
 describe("public gallery", () => {
-  it("builds a deduplicated gallery from baseline content and video", () => {
-    const items = buildPublicGalleryItems(approvedBaselineLanding("en"));
+  it("builds a deduplicated gallery with the configured hero video", () => {
+    const data = approvedBaselineLanding("en");
+    data.heroVideo = {
+      id: "hero-video",
+      url: "/api/content/media/hero-video",
+      mimeType: "video/mp4",
+      alt: "KOOKA atmosphere video",
+      caption: "A quiet moment at KOOKA",
+      sortOrder: 0,
+    };
+    const items = buildPublicGalleryItems(data);
 
     expect(items.length).toBeGreaterThan(3);
     expect(items.some((item) => item.kind === "VIDEO")).toBe(true);

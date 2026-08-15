@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   DateField,
+  FileField,
   MultiFileField,
   type SelectOption,
   KookaSelect,
@@ -3714,7 +3715,9 @@ function ContentAdmin({
   setNotice: (notice: Notice) => void;
 }) {
   const pages = Array.isArray(content) ? (content as JsonRecord[]) : [];
-  const assets = Array.isArray(media) ? (media as JsonRecord[]) : [];
+  const assets = (Array.isArray(media) ? (media as JsonRecord[]) : []).filter(
+    (asset) => String(asset.status) !== "ARCHIVED",
+  );
   const roomData = recordOf(rooms);
   const activeRoomTypes = latestBy(
     rowsOf(roomData.roomTypes),
@@ -3843,6 +3846,37 @@ function ContentAdmin({
     label: category.categoryNameId || category.categoryCode,
   }));
   const [files, setFiles] = useState<File[]>([]);
+  const [heroVideoFile, setHeroVideoFile] = useState<File | null>(null);
+  const [heroVideoTitle, setHeroVideoTitle] = useState("");
+  const [heroVideoAltId, setHeroVideoAltId] = useState(
+    "Suasana KOOKA Residence Surabaya",
+  );
+  const [heroVideoAltEn, setHeroVideoAltEn] = useState(
+    "The atmosphere at KOOKA Residence Surabaya",
+  );
+  const [landingImageFile, setLandingImageFile] = useState<File | null>(null);
+  const [landingImageSection, setLandingImageSection] = useState<
+    "experience" | "gallery"
+  >("experience");
+  const [landingImageTitle, setLandingImageTitle] = useState("");
+  const [landingImageAltId, setLandingImageAltId] = useState("");
+  const [landingImageAltEn, setLandingImageAltEn] = useState("");
+  const [landingImageCaptionId, setLandingImageCaptionId] = useState("");
+  const [landingImageCaptionEn, setLandingImageCaptionEn] = useState("");
+  const [landingSectionDrafts, setLandingSectionDrafts] = useState<
+    Record<string, string[]>
+  >({});
+  const [landingExistingAssetDrafts, setLandingExistingAssetDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [landingMetadataDrafts, setLandingMetadataDrafts] = useState<
+    Record<
+      string,
+      Partial<
+        Record<"title" | "altId" | "altEn" | "captionId" | "captionEn", string>
+      >
+    >
+  >({});
   const [title, setTitle] = useState("");
   const [altId, setAltId] = useState("");
   const [altEn, setAltEn] = useState("");
@@ -3853,6 +3887,10 @@ function ContentAdmin({
   const [selectedGalleryAssetIds, setSelectedGalleryAssetIds] = useState<
     string[]
   >([]);
+  const [deleteMediaTarget, setDeleteMediaTarget] = useState<JsonRecord | null>(
+    null,
+  );
+  const [deleteMediaReason, setDeleteMediaReason] = useState("");
   const [nameId, setNameId] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
@@ -3886,6 +3924,81 @@ function ContentAdmin({
     const nextSequence = Math.max(0, ...matchingCodes) + 1;
     return `${nameSeed}-${String(nextSequence).padStart(2, "0")}`;
   }, [menuCatalog, nameId]);
+  const activeHeroVideo = assets.find((asset) => {
+    if (
+      String(asset.mediaType) !== "VIDEO" ||
+      String(asset.status) !== "PUBLISHED"
+    )
+      return false;
+    const usages = Array.isArray(asset.usages)
+      ? (asset.usages as JsonRecord[])
+      : [];
+    return usages.some(
+      (usage) => String(usage.usageType) === "LANDING_HERO_VIDEO",
+    );
+  });
+
+  const landingSections = [
+    {
+      key: "experience" as const,
+      usageType: "LANDING_EXPERIENCE_MEDIA",
+      title: "The KOOKA feeling",
+      description:
+        "Tiga foto editorial di bagian suasana dan pengalaman KOOKA.",
+    },
+    {
+      key: "gallery" as const,
+      usageType: "LANDING_GALLERY_MEDIA",
+      title: "Galeri landing page",
+      description: "Tiga foto pada kolase galeri sebelum bagian lokasi.",
+    },
+  ];
+
+  function landingSectionAssetIds(section: "experience" | "gallery") {
+    const usageType =
+      section === "experience"
+        ? "LANDING_EXPERIENCE_MEDIA"
+        : "LANDING_GALLERY_MEDIA";
+    return assets
+      .flatMap((asset) => {
+        const usages = Array.isArray(asset.usages)
+          ? (asset.usages as JsonRecord[])
+          : [];
+        return usages
+          .filter((usage) => String(usage.usageType) === usageType)
+          .map((usage) => ({
+            assetId: String(asset.id),
+            order: Number(usage.sortOrder ?? 0),
+          }));
+      })
+      .sort((left, right) => left.order - right.order)
+      .map((item) => item.assetId);
+  }
+
+  function landingSectionSelection(section: "experience" | "gallery") {
+    return landingSectionDrafts[section] ?? landingSectionAssetIds(section);
+  }
+
+  function setLandingSectionSelection(
+    section: "experience" | "gallery",
+    assetIds: string[],
+  ) {
+    setLandingSectionDrafts((current) => ({
+      ...current,
+      [section]: assetIds,
+    }));
+  }
+
+  function updateLandingMetadataDraft(
+    assetId: string,
+    field: "title" | "altId" | "altEn" | "captionId" | "captionEn",
+    value: string,
+  ) {
+    setLandingMetadataDrafts((current) => ({
+      ...current,
+      [assetId]: { ...current[assetId], [field]: value },
+    }));
+  }
 
   function roomGalleryAssetIds(roomTypeId: string) {
     if (!roomTypeId) return [];
@@ -3894,6 +4007,7 @@ function ContentAdmin({
         assets
           .filter(
             (asset) =>
+              String(asset.mediaType) === "IMAGE" &&
               String(asset.status) === "PUBLISHED" &&
               String(asset.scanStatus) === "CLEAN" &&
               Boolean(asset.authenticPropertyMedia),
@@ -4075,6 +4189,268 @@ function ContentAdmin({
     }
   }
 
+  async function uploadHeroVideo(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canManageMedia || !canPublishMedia) {
+      setNotice({
+        tone: "error",
+        message:
+          "Akun ini belum memiliki izin untuk mengunggah dan mempublikasikan video.",
+      });
+      return;
+    }
+    if (!heroVideoFile) {
+      setNotice({ tone: "error", message: "Pilih video hero MP4 dahulu." });
+      return;
+    }
+    if (heroVideoFile.type !== "video/mp4") {
+      setNotice({
+        tone: "error",
+        message: "Video hero harus menggunakan format MP4.",
+      });
+      return;
+    }
+    if (heroVideoFile.size > 24 * 1024 * 1024) {
+      setNotice({
+        tone: "error",
+        message: "Ukuran video hero maksimal 24 MB.",
+      });
+      return;
+    }
+    try {
+      const form = new FormData();
+      form.set("file", heroVideoFile);
+      form.set("title", heroVideoTitle.trim() || "Video hero landing page");
+      form.set("altId", heroVideoAltId);
+      form.set("altEn", heroVideoAltEn);
+      form.set("rightsSource", "Video milik KOOKA Residence");
+      form.set("authenticPropertyMedia", "true");
+      const response = await fetch("/api/staff/admin/media", {
+        method: "POST",
+        body: form,
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(result));
+      const uploadResult = recordOf(result);
+      if (String(uploadResult.scanStatus) !== "CLEAN") {
+        throw new Error(
+          "Video belum lolos pemeriksaan file dan belum dapat dipublikasikan.",
+        );
+      }
+      const assetId = String(uploadResult.id ?? "");
+      if (!assetId) throw new Error("ID video hasil upload tidak ditemukan.");
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "PUBLISH",
+          assetId,
+          reason: "Video hero diunggah oleh pengelola",
+        },
+        "PATCH",
+      );
+      await post(
+        "/api/staff/admin/media",
+        { action: "SET_LANDING_HERO_VIDEO", assetId },
+        "PATCH",
+      );
+      setHeroVideoFile(null);
+      setHeroVideoTitle("");
+      setNotice({
+        tone: "success",
+        message:
+          "Video hero berhasil diunggah dan langsung digunakan di landing page.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Upload video gagal.",
+      });
+    }
+  }
+
+  async function uploadLandingImage(event: React.FormEvent) {
+    event.preventDefault();
+    if (!canManageMedia || !canPublishMedia) {
+      setNotice({
+        tone: "error",
+        message:
+          "Akun ini belum memiliki izin untuk mengunggah dan mempublikasikan foto.",
+      });
+      return;
+    }
+    if (!landingImageFile) {
+      setNotice({ tone: "error", message: "Pilih foto terlebih dahulu." });
+      return;
+    }
+    const currentAssetIds = landingSectionSelection(landingImageSection);
+    if (currentAssetIds.length >= 3) {
+      setNotice({
+        tone: "error",
+        message:
+          "Bagian ini sudah memiliki 3 foto. Hapus salah satu foto dahulu.",
+      });
+      return;
+    }
+    try {
+      const form = new FormData();
+      form.set("file", landingImageFile);
+      form.set("title", landingImageTitle.trim() || landingImageFile.name);
+      form.set("altId", landingImageAltId);
+      form.set("altEn", landingImageAltEn);
+      form.set("captionId", landingImageCaptionId);
+      form.set("captionEn", landingImageCaptionEn);
+      form.set("rightsSource", "Foto milik KOOKA Residence");
+      form.set("authenticPropertyMedia", "true");
+      const response = await fetch("/api/staff/admin/media", {
+        method: "POST",
+        body: form,
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) throw new Error(messageFrom(result));
+      const uploadResult = recordOf(result);
+      const assetId = String(uploadResult.id ?? "");
+      if (!assetId || String(uploadResult.scanStatus) !== "CLEAN") {
+        throw new Error(
+          "Foto belum lolos pemeriksaan dan belum dapat ditampilkan.",
+        );
+      }
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "PUBLISH",
+          assetId,
+          reason: "Foto bagian landing page diunggah oleh pengelola",
+        },
+        "PATCH",
+      );
+      const nextAssetIds = [...currentAssetIds, assetId];
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "SET_LANDING_SECTION_MEDIA",
+          section: landingImageSection,
+          assetIds: nextAssetIds,
+        },
+        "PATCH",
+      );
+      setLandingImageFile(null);
+      setLandingImageTitle("");
+      setLandingImageAltId("");
+      setLandingImageAltEn("");
+      setLandingImageCaptionId("");
+      setLandingImageCaptionEn("");
+      setLandingSectionDrafts((current) => {
+        const next = { ...current };
+        delete next[landingImageSection];
+        return next;
+      });
+      setNotice({
+        tone: "success",
+        message:
+          "Foto berhasil diunggah dan langsung digunakan pada landing page.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : "Upload foto gagal.",
+      });
+    }
+  }
+
+  function moveLandingSectionAsset(
+    section: "experience" | "gallery",
+    assetId: string,
+    direction: -1 | 1,
+  ) {
+    const current = landingSectionSelection(section);
+    const index = current.indexOf(assetId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= current.length) return;
+    const next = [...current];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    setLandingSectionSelection(section, next);
+  }
+
+  function addExistingLandingAsset(section: "experience" | "gallery") {
+    const assetId = landingExistingAssetDrafts[section];
+    if (!assetId) return;
+    const current = landingSectionSelection(section);
+    if (current.includes(assetId)) return;
+    if (current.length >= 3) {
+      setNotice({
+        tone: "error",
+        message: "Maksimal 3 foto untuk setiap bagian landing page.",
+      });
+      return;
+    }
+    setLandingSectionSelection(section, [...current, assetId]);
+    setLandingExistingAssetDrafts((drafts) => ({
+      ...drafts,
+      [section]: "",
+    }));
+  }
+
+  async function saveLandingSection(section: "experience" | "gallery") {
+    const assetIds = landingSectionSelection(section);
+    try {
+      for (const assetId of assetIds) {
+        const asset = assets.find(
+          (candidate) => String(candidate.id) === assetId,
+        );
+        const draft = landingMetadataDrafts[assetId];
+        if (!asset || !draft) continue;
+        await post(
+          "/api/staff/admin/media",
+          {
+            action: "UPDATE_METADATA",
+            assetId,
+            title: draft.title ?? String(asset.title ?? ""),
+            altId: draft.altId ?? String(asset.altId ?? ""),
+            altEn: draft.altEn ?? String(asset.altEn ?? ""),
+            captionId: draft.captionId ?? String(asset.captionId ?? ""),
+            captionEn: draft.captionEn ?? String(asset.captionEn ?? ""),
+          },
+          "PATCH",
+        );
+      }
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "SET_LANDING_SECTION_MEDIA",
+          section,
+          assetIds,
+        },
+        "PATCH",
+      );
+      setLandingSectionDrafts((current) => {
+        const next = { ...current };
+        delete next[section];
+        return next;
+      });
+      setLandingMetadataDrafts((current) => {
+        const next = { ...current };
+        for (const assetId of assetIds) delete next[assetId];
+        return next;
+      });
+      setNotice({
+        tone: "success",
+        message:
+          "Foto, urutan, dan keterangan bagian landing berhasil disimpan.",
+      });
+      await load();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Pengaturan foto landing gagal disimpan.",
+      });
+    }
+  }
+
   async function publishMedia(assetId: string) {
     try {
       await post(
@@ -4093,6 +4469,36 @@ function ContentAdmin({
         tone: "error",
         message:
           error instanceof Error ? error.message : "Foto gagal dipublikasikan.",
+      });
+    }
+  }
+
+  async function deleteMedia() {
+    if (!deleteMediaTarget) return;
+    try {
+      await post(
+        "/api/staff/admin/media",
+        {
+          action: "DELETE",
+          assetId: String(deleteMediaTarget.id),
+          reason: deleteMediaReason,
+        },
+        "PATCH",
+      );
+      setDeleteMediaTarget(null);
+      setDeleteMediaReason("");
+      setNotice({
+        tone: "success",
+        message: "Media berhasil dihapus dari galeri tersimpan.",
+      });
+      await load();
+    } catch (error) {
+      setDeleteMediaTarget(null);
+      setDeleteMediaReason("");
+      setNotice({
+        tone: "error",
+        message:
+          error instanceof Error ? error.message : "Media gagal dihapus.",
       });
     }
   }
@@ -4398,6 +4804,427 @@ function ContentAdmin({
           <section className={`${styles.formCard} ${styles.roomUploadCard}`}>
             <div className={styles.panelHeader}>
               <div>
+                <h2>Video hero landing page</h2>
+                <p className={styles.formHint}>
+                  Unggah video utama yang tampil di bagian paling atas website.
+                  Video baru otomatis menggantikan video aktif.
+                </p>
+              </div>
+              <span className={styles.countPill}>
+                {activeHeroVideo ? "Aktif" : "Belum diatur"}
+              </span>
+            </div>
+            <form className={styles.staffForm} onSubmit={uploadHeroVideo}>
+              {activeHeroVideo ? (
+                <div className={styles.heroVideoAdminPreview}>
+                  <video
+                    controls
+                    muted
+                    playsInline
+                    preload="metadata"
+                    src={`/api/content/media/${String(activeHeroVideo.id)}`}
+                  />
+                  <div>
+                    <strong>
+                      {String(activeHeroVideo.title || "Video hero aktif")}
+                    </strong>
+                    <small>
+                      {String(activeHeroVideo.mimeType || "video/mp4")} ·{" "}
+                      {Math.max(
+                        1,
+                        Math.round(
+                          Number(activeHeroVideo.byteSize ?? 0) / 1024,
+                        ),
+                      ).toLocaleString("id-ID")}{" "}
+                      KB
+                    </small>
+                  </div>
+                </div>
+              ) : (
+                <p className={styles.emptyCompact}>
+                  Belum ada video hero aktif. Foto hero tetap digunakan sebagai
+                  tampilan cadangan.
+                </p>
+              )}
+              <FileField
+                accept="video/mp4,.mp4"
+                file={heroVideoFile}
+                helper="MP4 maksimal 24 MB · H.264/AAC disarankan"
+                label={activeHeroVideo ? "Ganti video hero" : "Video hero MP4"}
+                onChange={setHeroVideoFile}
+              />
+              <label>
+                Judul video
+                <input
+                  placeholder="Contoh: Suasana pagi KOOKA Residence"
+                  value={heroVideoTitle}
+                  onChange={(event) => setHeroVideoTitle(event.target.value)}
+                />
+              </label>
+              <div className={styles.formGrid}>
+                <label>
+                  Deskripsi aksesibilitas Indonesia
+                  <input
+                    required
+                    value={heroVideoAltId}
+                    onChange={(event) => setHeroVideoAltId(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Deskripsi aksesibilitas English
+                  <input
+                    required
+                    value={heroVideoAltEn}
+                    onChange={(event) => setHeroVideoAltEn(event.target.value)}
+                  />
+                </label>
+              </div>
+              <button
+                className={styles.primaryButton}
+                disabled={!canManageMedia || !canPublishMedia || !heroVideoFile}
+                type="submit"
+              >
+                {activeHeroVideo
+                  ? "Upload & ganti video hero"
+                  : "Upload & gunakan video hero"}
+              </button>
+            </form>
+          </section>
+          <section
+            className={`${styles.panel} ${styles.landingSectionMediaPanel}`}
+          >
+            <div className={styles.panelHeader}>
+              <div>
+                <h2>Foto bagian landing page</h2>
+                <p className={styles.formHint}>
+                  Kelola foto dan keterangan yang tampil pada bagian “The KOOKA
+                  feeling” dan kolase galeri.
+                </p>
+              </div>
+              <span className={styles.countPill}>Maks. 3 per bagian</span>
+            </div>
+            <form
+              className={`${styles.staffForm} ${styles.landingImageUploadForm}`}
+              onSubmit={uploadLandingImage}
+            >
+              <div className={styles.formGrid}>
+                <label>
+                  Tampilkan foto di
+                  <KookaSelect
+                    ariaLabel="Bagian landing page"
+                    onChange={(value) =>
+                      setLandingImageSection(
+                        value === "gallery" ? "gallery" : "experience",
+                      )
+                    }
+                    options={landingSections.map((section) => ({
+                      value: section.key,
+                      label: section.title,
+                      description: section.description,
+                    }))}
+                    value={landingImageSection}
+                  />
+                </label>
+                <FileField
+                  accept="image/jpeg,image/png"
+                  file={landingImageFile}
+                  helper="JPEG atau PNG · unggah satu foto agar keterangannya tepat"
+                  label="Pilih foto"
+                  onChange={setLandingImageFile}
+                />
+              </div>
+              <label>
+                Judul internal
+                <input
+                  placeholder="Contoh: Halaman tengah KOOKA"
+                  value={landingImageTitle}
+                  onChange={(event) => setLandingImageTitle(event.target.value)}
+                />
+              </label>
+              <div className={styles.formGrid}>
+                <label>
+                  Keterangan foto Indonesia
+                  <input
+                    placeholder="Contoh: Halaman hijau"
+                    required
+                    value={landingImageCaptionId}
+                    onChange={(event) =>
+                      setLandingImageCaptionId(event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Photo label English
+                  <input
+                    placeholder="Example: Leafy courtyard"
+                    required
+                    value={landingImageCaptionEn}
+                    onChange={(event) =>
+                      setLandingImageCaptionEn(event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Deskripsi aksesibilitas Indonesia
+                  <input
+                    placeholder="Jelaskan isi foto secara singkat"
+                    required
+                    value={landingImageAltId}
+                    onChange={(event) =>
+                      setLandingImageAltId(event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  Accessibility description English
+                  <input
+                    placeholder="Briefly describe the image"
+                    required
+                    value={landingImageAltEn}
+                    onChange={(event) =>
+                      setLandingImageAltEn(event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+              <button
+                className={styles.primaryButton}
+                disabled={
+                  !canManageMedia || !canPublishMedia || !landingImageFile
+                }
+                type="submit"
+              >
+                Upload & tampilkan foto
+              </button>
+            </form>
+
+            <div className={styles.landingSectionEditors}>
+              {landingSections.map((section) => {
+                const selectedAssetIds = landingSectionSelection(section.key);
+                const availableAssets = assets.filter(
+                  (asset) =>
+                    String(asset.mediaType) === "IMAGE" &&
+                    String(asset.status) === "PUBLISHED" &&
+                    String(asset.scanStatus) === "CLEAN" &&
+                    Boolean(asset.authenticPropertyMedia) &&
+                    !selectedAssetIds.includes(String(asset.id)),
+                );
+                return (
+                  <article
+                    className={styles.landingSectionEditor}
+                    key={section.key}
+                  >
+                    <div className={styles.panelHeader}>
+                      <div>
+                        <h3>{section.title}</h3>
+                        <p className={styles.formHint}>{section.description}</p>
+                      </div>
+                      <span className={styles.countPill}>
+                        {selectedAssetIds.length}/3 foto
+                      </span>
+                    </div>
+                    {selectedAssetIds.length ? (
+                      <div className={styles.landingSelectedMediaList}>
+                        {selectedAssetIds.map((assetId, index) => {
+                          const asset = assets.find(
+                            (candidate) => String(candidate.id) === assetId,
+                          );
+                          if (!asset) return null;
+                          const draft = landingMetadataDrafts[assetId] ?? {};
+                          return (
+                            <div
+                              className={styles.landingSelectedMediaItem}
+                              key={assetId}
+                            >
+                              <div className={styles.landingSelectedMediaTop}>
+                                <Image
+                                  alt={String(
+                                    asset.altId ?? asset.title ?? "Foto KOOKA",
+                                  )}
+                                  height={90}
+                                  src={`/api/content/media/${assetId}`}
+                                  unoptimized
+                                  width={135}
+                                />
+                                <div>
+                                  <strong>
+                                    {index + 1}. {String(asset.title || "Foto")}
+                                  </strong>
+                                  <span className={styles.inlineActions}>
+                                    <button
+                                      aria-label="Naikkan urutan foto"
+                                      className={`${styles.textButton} ${styles.landingMediaOrderButton}`}
+                                      disabled={index === 0}
+                                      onClick={() =>
+                                        moveLandingSectionAsset(
+                                          section.key,
+                                          assetId,
+                                          -1,
+                                        )
+                                      }
+                                      type="button"
+                                    >
+                                      ↑
+                                    </button>
+                                    <button
+                                      aria-label="Turunkan urutan foto"
+                                      className={`${styles.textButton} ${styles.landingMediaOrderButton}`}
+                                      disabled={
+                                        index === selectedAssetIds.length - 1
+                                      }
+                                      onClick={() =>
+                                        moveLandingSectionAsset(
+                                          section.key,
+                                          assetId,
+                                          1,
+                                        )
+                                      }
+                                      type="button"
+                                    >
+                                      ↓
+                                    </button>
+                                    <button
+                                      className={`${styles.textButton} ${styles.landingMediaRemoveButton}`}
+                                      onClick={() =>
+                                        setLandingSectionSelection(
+                                          section.key,
+                                          selectedAssetIds.filter(
+                                            (id) => id !== assetId,
+                                          ),
+                                        )
+                                      }
+                                      type="button"
+                                    >
+                                      Hapus
+                                    </button>
+                                  </span>
+                                </div>
+                              </div>
+                              <div
+                                className={`${styles.formGrid} ${styles.landingMetadataGrid}`}
+                              >
+                                <label>
+                                  Keterangan Indonesia
+                                  <input
+                                    value={
+                                      draft.captionId ??
+                                      String(asset.captionId ?? "")
+                                    }
+                                    onChange={(event) =>
+                                      updateLandingMetadataDraft(
+                                        assetId,
+                                        "captionId",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  Keterangan English
+                                  <input
+                                    value={
+                                      draft.captionEn ??
+                                      String(asset.captionEn ?? "")
+                                    }
+                                    onChange={(event) =>
+                                      updateLandingMetadataDraft(
+                                        assetId,
+                                        "captionEn",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  Alt text Indonesia
+                                  <input
+                                    required
+                                    value={
+                                      draft.altId ?? String(asset.altId ?? "")
+                                    }
+                                    onChange={(event) =>
+                                      updateLandingMetadataDraft(
+                                        assetId,
+                                        "altId",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  Alt text English
+                                  <input
+                                    required
+                                    value={
+                                      draft.altEn ?? String(asset.altEn ?? "")
+                                    }
+                                    onChange={(event) =>
+                                      updateLandingMetadataDraft(
+                                        assetId,
+                                        "altEn",
+                                        event.target.value,
+                                      )
+                                    }
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className={styles.emptyCompact}>
+                        Belum diatur melalui CMS. Landing page masih memakai
+                        foto bawaan.
+                      </p>
+                    )}
+                    {selectedAssetIds.length < 3 && availableAssets.length ? (
+                      <div className={styles.landingExistingMediaPicker}>
+                        <KookaSelect
+                          ariaLabel={`Tambah foto ke ${section.title}`}
+                          emptyMessage="Tidak ada foto lain"
+                          onChange={(value) =>
+                            setLandingExistingAssetDrafts((current) => ({
+                              ...current,
+                              [section.key]: value,
+                            }))
+                          }
+                          options={availableAssets.map((asset) => ({
+                            value: String(asset.id),
+                            label: String(asset.title || "Foto tanpa judul"),
+                            description: String(
+                              asset.captionId || asset.altId || "",
+                            ),
+                          }))}
+                          placeholder="Pilih dari galeri tersimpan"
+                          value={landingExistingAssetDrafts[section.key] ?? ""}
+                        />
+                        <button
+                          className={styles.secondaryButton}
+                          disabled={!landingExistingAssetDrafts[section.key]}
+                          onClick={() => addExistingLandingAsset(section.key)}
+                          type="button"
+                        >
+                          Tambahkan
+                        </button>
+                      </div>
+                    ) : null}
+                    <button
+                      className={styles.primaryButton}
+                      disabled={!canManageMedia}
+                      onClick={() => void saveLandingSection(section.key)}
+                      type="button"
+                    >
+                      Simpan foto & keterangan
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+          <section className={`${styles.formCard} ${styles.roomUploadCard}`}>
+            <div className={styles.panelHeader}>
+              <div>
                 <h2>Tambah foto kamar</h2>
                 <p className={styles.formHint}>
                   Pilih jenis kamar dan beberapa foto. Sistem langsung
@@ -4538,6 +5365,7 @@ function ContentAdmin({
                     {assets
                       .filter(
                         (asset) =>
+                          String(asset.mediaType) === "IMAGE" &&
                           String(asset.status) === "PUBLISHED" &&
                           String(asset.scanStatus) === "CLEAN" &&
                           Boolean(asset.authenticPropertyMedia),
@@ -4580,6 +5408,7 @@ function ContentAdmin({
                   </div>
                   {!assets.some(
                     (asset) =>
+                      String(asset.mediaType) === "IMAGE" &&
                       String(asset.status) === "PUBLISHED" &&
                       String(asset.scanStatus) === "CLEAN" &&
                       Boolean(asset.authenticPropertyMedia),
@@ -4661,46 +5490,70 @@ function ContentAdmin({
             ) : null}
             {assets.length ? (
               <div className={styles.masterList}>
-                {assets.map((asset) => (
-                  <article key={`${String(asset.id)}`}>
-                    <div>
-                      <strong>
-                        {String(asset.title || "Foto tanpa judul")}
-                      </strong>
-                      <small>
-                        {String(asset.mediaType || "MEDIA")} · status:{" "}
-                        {String(asset.status || "DRAFT")} · scan:{" "}
-                        {String(asset.scanStatus || "UNKNOWN")}
-                      </small>
-                      <small>
-                        {Boolean(asset.authenticPropertyMedia)
-                          ? "Foto asli properti"
-                          : "Foto non-properti"}
-                      </small>
-                    </div>
-                    <div className={styles.inlineActions}>
-                      <span className={styles.statusPill}>
-                        {String(asset.mimeType || "N/A")}
-                      </span>
-                      {String(asset.status) === "DRAFT" ? (
+                {assets.map((asset) => {
+                  const usageCount = Array.isArray(asset.usages)
+                    ? asset.usages.length
+                    : 0;
+                  return (
+                    <article key={`${String(asset.id)}`}>
+                      <div>
+                        <strong>
+                          {String(asset.title || "Media tanpa judul")}
+                        </strong>
+                        <small>
+                          {String(asset.mediaType || "MEDIA")} · status:{" "}
+                          {String(asset.status || "DRAFT")} · scan:{" "}
+                          {String(asset.scanStatus || "UNKNOWN")}
+                        </small>
+                        <small>
+                          {Boolean(asset.authenticPropertyMedia)
+                            ? "Media milik properti"
+                            : "Media non-properti"}
+                        </small>
+                      </div>
+                      <div className={styles.inlineActions}>
+                        <span className={styles.statusPill}>
+                          {String(asset.mimeType || "N/A")}
+                        </span>
+                        {usageCount > 0 ? (
+                          <span className={styles.statusPill}>
+                            Dipakai {usageCount} bagian
+                          </span>
+                        ) : null}
+                        {String(asset.status) === "DRAFT" ? (
+                          <button
+                            className={styles.secondaryButton}
+                            disabled={!canPublishMedia}
+                            onClick={() => void publishMedia(String(asset.id))}
+                            type="button"
+                          >
+                            {String(asset.scanStatus) === "PENDING"
+                              ? "Periksa & publikasikan"
+                              : "Publikasikan"}
+                          </button>
+                        ) : null}
                         <button
-                          className={styles.secondaryButton}
-                          disabled={!canPublishMedia}
-                          onClick={() => void publishMedia(String(asset.id))}
+                          className={styles.dangerButton}
+                          disabled={!canPublishMedia || usageCount > 0}
+                          onClick={() => setDeleteMediaTarget(asset)}
+                          title={
+                            usageCount > 0
+                              ? "Lepaskan media dari hero, landing page, atau galeri kamar terlebih dahulu."
+                              : "Hapus media"
+                          }
                           type="button"
                         >
-                          {String(asset.scanStatus) === "PENDING"
-                            ? "Periksa & publikasikan"
-                            : "Publikasikan"}
+                          Hapus
                         </button>
-                      ) : null}
-                    </div>
-                  </article>
-                ))}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <p className={styles.emptyCompact}>
-                Belum ada foto di galeri. Upload foto melalui formulir di atas.
+                Belum ada media tersimpan. Upload foto atau video melalui
+                formulir di atas.
               </p>
             )}
           </section>
@@ -5157,6 +6010,20 @@ function ContentAdmin({
         open={Boolean(lifecycleRequest)}
         title="Konfirmasi perubahan konten"
         value={lifecycleReason}
+      />
+      <ReasonDialog
+        confirmLabel="Hapus media"
+        description={`Media “${String(deleteMediaTarget?.title || "tanpa judul")}” akan dihapus dari galeri dan penyimpanan. Tindakan ini hanya dapat dilakukan bila media tidak sedang dipakai di website atau galeri kamar.`}
+        label="Alasan penghapusan"
+        onCancel={() => {
+          setDeleteMediaTarget(null);
+          setDeleteMediaReason("");
+        }}
+        onChange={setDeleteMediaReason}
+        onConfirm={() => void deleteMedia()}
+        open={Boolean(deleteMediaTarget)}
+        title="Hapus media tersimpan?"
+        value={deleteMediaReason}
       />
     </div>
   );

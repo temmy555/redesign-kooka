@@ -84,6 +84,9 @@ const PNG_BYTES = Buffer.from([
 ]);
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01, 0x02, 0x03]);
 const PDF_BYTES = Buffer.concat([Buffer.from("%PDF-1.4"), Buffer.from([0x0a])]);
+const MP4_BYTES = Buffer.from([
+  0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+]);
 
 function pngChunk(type: string, data: Buffer) {
   const chunk = Buffer.alloc(12 + data.length);
@@ -237,6 +240,18 @@ describe("saveStoredFile", () => {
     });
 
     expect(record).toMatchObject({ id: "file-pdf" });
+  });
+
+  it("accepts an MP4 upload with an ISO media signature", async () => {
+    insert.mockReturnValueOnce(chain([{ id: "file-mp4" }]));
+
+    const record = await saveStoredFile({
+      ...baseInput,
+      mimeType: "video/mp4",
+      bytes: MP4_BYTES,
+    });
+
+    expect(record).toMatchObject({ id: "file-mp4" });
   });
 
   it("strips PNG metadata before hashing and writing private bytes", async () => {

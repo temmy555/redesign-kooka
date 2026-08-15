@@ -556,7 +556,8 @@ export default function LandingPage({
     hero?.media?.[0]?.url ||
       landingValue(hero, "imageUrl", "/images/kooka-assets/ark-05080.jpg"),
   );
-  const heroVideo = landingValue(hero, "heroVideoUrl");
+  const heroVideo = data.heroVideo?.url ?? "";
+  const heroVideoMimeType = data.heroVideo?.mimeType ?? "video/mp4";
   const heroAlt =
     hero?.media?.[0]?.alt ||
     landingValue(hero, "imageAlt", "KOOKA Residence Surabaya");
@@ -723,8 +724,7 @@ export default function LandingPage({
                 setHeroVideoMuted(event.currentTarget.muted)
               }
             >
-              <source src={heroVideo} type="video/mp4" />
-              <source src={heroVideo} type="video/quicktime" />
+              <source src={heroVideo} type={heroVideoMimeType} />
             </video>
           ) : (
             <Image
@@ -1000,9 +1000,10 @@ export default function LandingPage({
                 sizes="(max-width: 900px) 100vw, 35vw"
               />
               <span className="gallery-label">
-                {locale === "id"
-                  ? ["Halaman", "Detail kamar", "Momen KOOKA"][index]
-                  : ["Courtyard", "Room detail", "KOOKA moments"][index]}
+                {experience?.media?.[index]?.caption ||
+                  (locale === "id"
+                    ? ["Halaman", "Detail kamar", "Momen KOOKA"][index]
+                    : ["Courtyard", "Room detail", "KOOKA moments"][index])}
               </span>
             </div>
           ))}
@@ -1142,9 +1143,10 @@ export default function LandingPage({
                 sizes="(max-width: 760px) 100vw, 50vw"
               />
               <span className="editorial-label">
-                {locale === "id"
-                  ? ["Kamar", "Halaman", "Detail"][index]
-                  : ["Room", "Courtyard", "Detail"][index]}
+                {gallery?.media?.[index]?.caption ||
+                  (locale === "id"
+                    ? ["Kamar", "Halaman", "Detail"][index]
+                    : ["Room", "Courtyard", "Detail"][index])}
               </span>
             </div>
           ))}

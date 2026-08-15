@@ -1261,6 +1261,240 @@
   white-space: nowrap;
 }
 
+.heroVideoAdminPreview {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid rgba(21, 61, 52, 0.12);
+  border-radius: 7px;
+  background: #edf1e8;
+}
+
+.heroVideoAdminPreview video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 5px;
+  background: #0d342c;
+  object-fit: cover;
+}
+
+.heroVideoAdminPreview div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.heroVideoAdminPreview strong,
+.heroVideoAdminPreview small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heroVideoAdminPreview small {
+  color: #748079;
+}
+
+.landingSectionMediaPanel {
+  overflow: visible;
+}
+
+.landingSectionMediaPanel > .panelHeader {
+  min-height: 0;
+  align-items: flex-start;
+  padding: 18px 22px;
+}
+
+.landingSectionMediaPanel > .panelHeader .formHint {
+  margin: 5px 0 0;
+}
+
+.landingImageUploadForm {
+  padding-bottom: 22px;
+  border-bottom: 1px solid rgba(21, 61, 52, 0.12);
+}
+
+.landingSectionEditors {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 22px;
+}
+
+.landingSectionEditor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(21, 61, 52, 0.12);
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.landingSectionEditor > .panelHeader {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+}
+
+.landingSectionEditor h3 {
+  margin: 0;
+  color: #153d34;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.landingSectionEditor .formHint {
+  margin: 4px 0 0;
+}
+
+.landingSelectedMediaList {
+  display: grid;
+  gap: 12px;
+}
+
+.landingSelectedMediaItem {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(21, 61, 52, 0.1);
+  border-radius: 7px;
+  background: rgba(224, 230, 219, 0.18);
+}
+
+.landingSelectedMediaTop {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.landingSelectedMediaTop img {
+  width: 108px;
+  height: 72px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.landingSelectedMediaTop > div {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.landingSelectedMediaTop strong {
+  overflow: hidden;
+  color: #294a42;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landingSelectedMediaTop .inlineActions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.landingSelectedMediaTop .landingMediaOrderButton,
+.landingSelectedMediaTop .landingMediaRemoveButton {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(21, 61, 52, 0.16);
+  border-radius: 7px;
+  background: #fffdf8;
+  color: #36584f;
+  font-size: 11px;
+  font-weight: 750;
+  text-decoration: none;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+}
+
+.landingSelectedMediaTop .landingMediaOrderButton {
+  width: 34px;
+  padding: 0;
+  font-size: 16px;
+}
+
+.landingSelectedMediaTop .landingMediaRemoveButton {
+  padding: 0 12px;
+  color: #974534;
+}
+
+.landingSelectedMediaTop .landingMediaOrderButton:hover:not(:disabled) {
+  border-color: rgba(21, 61, 52, 0.34);
+  background: #edf1e9;
+}
+
+.landingSelectedMediaTop .landingMediaRemoveButton:hover {
+  border-color: rgba(151, 69, 52, 0.3);
+  background: #faece7;
+}
+
+.landingSelectedMediaTop .landingMediaOrderButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.landingMetadataGrid label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #3e5b53;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.landingMetadataGrid input {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  appearance: none;
+  border: 1px solid rgba(21, 61, 52, 0.18);
+  border-radius: 9px;
+  padding: 0 14px;
+  outline: none;
+  background: #fffdf8;
+  box-shadow: 0 1px 0 rgba(21, 61, 52, 0.03);
+  color: #173f35;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.landingMetadataGrid input:hover {
+  border-color: rgba(21, 61, 52, 0.34);
+  background: #fff;
+}
+
+.landingMetadataGrid input:focus {
+  border-color: #627d61;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(98, 125, 97, 0.12);
+}
+
+.landingExistingMediaPicker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.landingExistingMediaPicker .secondaryButton {
+  min-width: 108px;
+}
+
 .roomGalleryPanel:has(.selectMenu) {
   z-index: 100;
 }
@@ -3566,6 +3800,9 @@
 
 .inlineActions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -3622,6 +3859,11 @@
   font-weight: 750;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.dangerButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .emptyCompact {
@@ -3718,6 +3960,10 @@
     grid-template-columns: 1fr;
   }
 
+  .landingSectionEditors {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .attendanceAdminLayout {
     grid-template-columns: 1fr;
   }
@@ -3756,6 +4002,20 @@
 }
 
 @media (max-width: 680px) {
+  .landingSectionEditors,
+  .landingExistingMediaPicker {
+    grid-template-columns: 1fr;
+  }
+
+  .landingSelectedMediaTop {
+    grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .landingSelectedMediaTop img {
+    width: 84px;
+    height: 64px;
+  }
+
   .amenityQuickSetup {
     align-items: stretch;
     flex-direction: column;

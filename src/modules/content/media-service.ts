@@ -42,6 +42,13 @@ export interface MediaMetadataInput {
 export type CmsMediaUsageType =
   "CONTENT_SECTION" | "ROOM_TYPE_HERO" | "ROOM_TYPE_GALLERY";
 
+export type LandingMediaSection = "experience" | "gallery";
+
+const landingMediaUsageBySection: Record<LandingMediaSection, string> = {
+  experience: "LANDING_EXPERIENCE_MEDIA",
+  gallery: "LANDING_GALLERY_MEDIA",
+};
+
 export async function getMediaOverview(params: {
   session: ContentStaffSession;
   propertyId: string;
@@ -59,6 +66,8 @@ export async function getMediaOverview(params: {
       title: mediaAssets.title,
       altId: mediaAssets.altId,
       altEn: mediaAssets.altEn,
+      captionId: mediaAssets.captionId,
+      captionEn: mediaAssets.captionEn,
       rightsSource: mediaAssets.rightsSource,
       authenticPropertyMedia: mediaAssets.authenticPropertyMedia,
       fileId: storedFiles.id,
@@ -129,10 +138,11 @@ export async function uploadCmsMedia(params: {
       "Bilingual alt text and media rights source are required",
     );
   }
-  if (!params.mimeType.startsWith("image/")) {
+  const mediaType = params.mimeType === "video/mp4" ? "VIDEO" : "IMAGE";
+  if (!["image/jpeg", "image/png", "video/mp4"].includes(params.mimeType)) {
     throw new AppError(
       "VALIDATION_ERROR",
-      "Phase 1 CMS accepts JPEG or PNG images only",
+      "CMS accepts JPEG, PNG, or MP4 media only",
     );
   }
 
@@ -160,7 +170,7 @@ export async function uploadCmsMedia(params: {
         .values({
           propertyId: params.propertyId,
           fileId: file.id,
-          mediaType: "IMAGE",
+          mediaType,
           title: textOrNull(params.metadata.title),
           altId,
           altEn,
@@ -207,11 +217,16 @@ async function getOwnedMedia(assetId: string, propertyId: string) {
     .select({
       id: mediaAssets.id,
       fileId: mediaAssets.fileId,
+      mediaType: mediaAssets.mediaType,
+      mimeType: storedFiles.mimeType,
       status: mediaAssets.status,
       authenticPropertyMedia: mediaAssets.authenticPropertyMedia,
       rightsSource: mediaAssets.rightsSource,
       altId: mediaAssets.altId,
       altEn: mediaAssets.altEn,
+      title: mediaAssets.title,
+      captionId: mediaAssets.captionId,
+      captionEn: mediaAssets.captionEn,
       scanStatus: storedFiles.scanStatus,
       purgedAt: storedFiles.purgedAt,
     })
@@ -223,6 +238,73 @@ async function getOwnedMedia(assetId: string, propertyId: string) {
     .limit(1);
   if (!asset) throw new AppError("NOT_FOUND", "Media asset not found");
   return asset;
+}
+
+export async function updateCmsMediaMetadata(params: {
+  session: ContentStaffSession;
+  propertyId: string;
+  assetId: string;
+  title?: string | null;
+  altId: string;
+  altEn: string;
+  captionId?: string | null;
+  captionEn?: string | null;
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "cms.media.manage",
+  );
+  const asset = await getOwnedMedia(params.assetId, params.propertyId);
+  const altId = params.altId.trim();
+  const altEn = params.altEn.trim();
+  if (!altId || !altEn) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Deskripsi gambar Indonesia dan English wajib diisi",
+    );
+  }
+  return getDatabase().transaction(async (tx) => {
+    await tx
+      .update(mediaAssets)
+      .set({
+        title: textOrNull(params.title),
+        altId,
+        altEn,
+        captionId: textOrNull(params.captionId),
+        captionEn: textOrNull(params.captionEn),
+        updatedAt: new Date(),
+        updatedByUserId: params.session.user.id,
+      })
+      .where(eq(mediaAssets.id, asset.id));
+    await recordAuditEvent(
+      {
+        propertyId: params.propertyId,
+        actorUserId: params.session.user.id,
+        actorType: "user",
+        action: "cms.media.metadata.update",
+        targetType: "media_asset",
+        targetId: asset.id,
+        before: {
+          title: asset.title,
+          altId: asset.altId,
+          altEn: asset.altEn,
+          captionId: asset.captionId,
+          captionEn: asset.captionEn,
+        },
+        after: {
+          title: textOrNull(params.title),
+          altId,
+          altEn,
+          captionId: textOrNull(params.captionId),
+          captionEn: textOrNull(params.captionEn),
+        },
+        result: "SUCCESS",
+      },
+      tx,
+    );
+    return { id: asset.id, status: "UPDATED" };
+  });
 }
 
 export async function publishCmsMedia(params: {
@@ -334,6 +416,76 @@ export async function archiveCmsMedia(params: {
     );
     return { id: asset.id, status: "ARCHIVED" };
   });
+}
+
+export async function deleteCmsMedia(params: {
+  session: ContentStaffSession;
+  propertyId: string;
+  assetId: string;
+  reason: string;
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "cms.media.publish",
+  );
+  const asset = await getOwnedMedia(params.assetId, params.propertyId);
+  const reason = params.reason.trim();
+  if (reason.length < 3) {
+    throw new AppError("VALIDATION_ERROR", "Alasan penghapusan wajib diisi");
+  }
+  const usages = await getDatabase()
+    .select({ usageType: mediaUsages.usageType })
+    .from(mediaUsages)
+    .where(eq(mediaUsages.mediaAssetId, asset.id));
+  if (usages.length > 0) {
+    const usageLabels = [
+      ...new Set(
+        usages.map(({ usageType }) => {
+          if (usageType === "LANDING_HERO_VIDEO") return "video hero";
+          if (usageType === "LANDING_EXPERIENCE_MEDIA")
+            return "bagian suasana KOOKA";
+          if (usageType === "LANDING_GALLERY_MEDIA")
+            return "galeri landing page";
+          if (usageType === "ROOM_TYPE_HERO") return "foto utama kamar";
+          if (usageType === "ROOM_TYPE_GALLERY") return "galeri kamar";
+          return "konten website";
+        }),
+      ),
+    ];
+    throw new AppError(
+      "CONFLICT",
+      `Media masih digunakan pada ${usageLabels.join(", ")}. Lepaskan media dari bagian tersebut terlebih dahulu.`,
+    );
+  }
+  const result = await getDatabase().transaction(async (tx) => {
+    await tx
+      .update(mediaAssets)
+      .set({
+        status: "ARCHIVED",
+        updatedAt: new Date(),
+        updatedByUserId: params.session.user.id,
+      })
+      .where(eq(mediaAssets.id, asset.id));
+    await recordAuditEvent(
+      {
+        propertyId: params.propertyId,
+        actorUserId: params.session.user.id,
+        actorType: "user",
+        action: "cms.media.delete",
+        targetType: "media_asset",
+        targetId: asset.id,
+        before: { status: asset.status },
+        after: { status: "ARCHIVED" },
+        reason,
+        result: "SUCCESS",
+      },
+      tx,
+    );
+    return { id: asset.id, status: "DELETED" };
+  });
+  await purgeStoredFile(asset.fileId, params.session.user.id);
+  return result;
 }
 
 async function assertMediaTarget(params: {
@@ -475,6 +627,7 @@ export async function setRoomTypeGallery(params: {
     assets.some(
       (asset) =>
         asset.status !== "PUBLISHED" ||
+        asset.mediaType !== "IMAGE" ||
         asset.scanStatus !== "CLEAN" ||
         asset.purgedAt ||
         !asset.authenticPropertyMedia,
@@ -526,6 +679,140 @@ export async function setRoomTypeGallery(params: {
       assetIds,
       heroAssetId: assetIds[0],
     };
+  });
+}
+
+export async function setLandingHeroVideo(params: {
+  session: ContentStaffSession;
+  propertyId: string;
+  assetId: string;
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "cms.media.manage",
+  );
+  const asset = await getOwnedMedia(params.assetId, params.propertyId);
+  if (
+    asset.status !== "PUBLISHED" ||
+    asset.mediaType !== "VIDEO" ||
+    asset.mimeType !== "video/mp4" ||
+    asset.scanStatus !== "CLEAN" ||
+    asset.purgedAt ||
+    !asset.authenticPropertyMedia
+  ) {
+    throw new AppError(
+      "CONFLICT",
+      "Only a published, verified MP4 owned by the property can be used as the hero video",
+    );
+  }
+
+  return getDatabase().transaction(async (tx) => {
+    await tx
+      .delete(mediaUsages)
+      .where(
+        and(
+          eq(mediaUsages.usageType, "LANDING_HERO_VIDEO"),
+          eq(mediaUsages.targetId, params.propertyId),
+        ),
+      );
+    await tx.insert(mediaUsages).values({
+      mediaAssetId: params.assetId,
+      usageType: "LANDING_HERO_VIDEO",
+      targetId: params.propertyId,
+      sortOrder: 0,
+      createdByUserId: params.session.user.id,
+      updatedByUserId: params.session.user.id,
+    });
+    await recordAuditEvent(
+      {
+        propertyId: params.propertyId,
+        actorUserId: params.session.user.id,
+        actorType: "user",
+        action: "cms.media.hero_video.set",
+        targetType: "property",
+        targetId: params.propertyId,
+        after: { assetId: params.assetId },
+        result: "SUCCESS",
+      },
+      tx,
+    );
+    return { assetId: params.assetId, status: "ACTIVE" };
+  });
+}
+
+export async function setLandingSectionMedia(params: {
+  session: ContentStaffSession;
+  propertyId: string;
+  section: LandingMediaSection;
+  assetIds: string[];
+}) {
+  await requirePermission(
+    params.session,
+    params.propertyId,
+    "cms.media.manage",
+  );
+  const assetIds = [...new Set(params.assetIds)];
+  if (assetIds.length > 3) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Setiap bagian landing page menggunakan maksimal 3 foto",
+    );
+  }
+  const assets = await Promise.all(
+    assetIds.map((assetId) => getOwnedMedia(assetId, params.propertyId)),
+  );
+  if (
+    assets.some(
+      (asset) =>
+        asset.status !== "PUBLISHED" ||
+        asset.mediaType !== "IMAGE" ||
+        asset.scanStatus !== "CLEAN" ||
+        asset.purgedAt ||
+        !asset.authenticPropertyMedia,
+    )
+  ) {
+    throw new AppError(
+      "CONFLICT",
+      "Hanya foto properti yang sudah dipublikasikan dan lolos pemeriksaan yang dapat digunakan",
+    );
+  }
+  const usageType = landingMediaUsageBySection[params.section];
+  return getDatabase().transaction(async (tx) => {
+    await tx
+      .delete(mediaUsages)
+      .where(
+        and(
+          eq(mediaUsages.usageType, usageType),
+          eq(mediaUsages.targetId, params.propertyId),
+        ),
+      );
+    if (assetIds.length) {
+      await tx.insert(mediaUsages).values(
+        assetIds.map((assetId, index) => ({
+          mediaAssetId: assetId,
+          usageType,
+          targetId: params.propertyId,
+          sortOrder: index,
+          createdByUserId: params.session.user.id,
+          updatedByUserId: params.session.user.id,
+        })),
+      );
+    }
+    await recordAuditEvent(
+      {
+        propertyId: params.propertyId,
+        actorUserId: params.session.user.id,
+        actorType: "user",
+        action: "cms.media.landing_section.set",
+        targetType: "property",
+        targetId: params.propertyId,
+        after: { section: params.section, assetIds },
+        result: "SUCCESS",
+      },
+      tx,
+    );
+    return { section: params.section, assetIds };
   });
 }
 
