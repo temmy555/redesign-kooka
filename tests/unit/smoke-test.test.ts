@@ -88,6 +88,17 @@ describe("automated smoke test", () => {
     const fetchImpl = successfulFetch();
     fetchImpl.mockImplementation(async (input: URL | RequestInfo) => {
       const url = new URL(input instanceof URL ? input : String(input));
+      if (url.pathname === "/api/booking/availability") {
+        return json(
+          {
+            error: {
+              code: "SERVICE_UNAVAILABLE",
+              message: "The website is currently under maintenance",
+            },
+          },
+          503,
+        );
+      }
       if (url.pathname === "/") {
         return new Response("KOOKA Website Under Maintenance", { status: 503 });
       }
@@ -102,6 +113,11 @@ describe("automated smoke test", () => {
     );
 
     expect(report.passed).toBe(true);
+    expect(
+      report.results.find(
+        (result) => result.name === "Read-only room availability",
+      )?.detail,
+    ).toBe("public booking search is blocked as expected during maintenance");
     expect(report.results.at(-1)?.detail).toBe("maintenance page is active");
   });
 });

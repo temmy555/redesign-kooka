@@ -53,6 +53,10 @@ Saat maintenance memang harus aktif:
 SMOKE_EXPECT_MAINTENANCE=on npm run smoke:production
 ```
 
+Dalam mode ini, respons `503` dari pencarian kamar dinilai benar karena booking
+publik memang sedang ditutup. Untuk tetap menguji mesin availability yang berada
+di balik maintenance, sertakan password preview seperti pada bagian berikutnya.
+
 ## Memeriksa landing production di balik maintenance
 
 Password tidak disimpan di repository. Berikan password preview hanya untuk

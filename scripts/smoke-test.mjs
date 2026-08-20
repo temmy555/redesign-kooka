@@ -203,39 +203,6 @@ export async function runSmokeTests(configuration, fetchImpl = fetch) {
     return `${json.categories.length} categories; ${itemCount} items`;
   });
 
-  await check("Read-only room availability", async () => {
-    const query = new URLSearchParams({
-      checkInDate: dateInJakarta(1),
-      checkoutDate: dateInJakarta(2),
-      rooms: "1",
-      adults: "2",
-      children: "0",
-      infants: "0",
-    });
-    const response = await request(`/api/booking/availability?${query}`);
-    const { json } = await responsePayload(response);
-    assert(
-      response.status === 200,
-      `availability API returned HTTP ${response.status}`,
-    );
-    assert(
-      json && typeof json === "object",
-      "availability API did not return JSON",
-    );
-    return "search completed without creating a booking";
-  });
-
-  await check("Staff login page", async () => {
-    const response = await request("/staff/login");
-    const { text } = await responsePayload(response);
-    assert(
-      response.status === 200,
-      `staff login returned HTTP ${response.status}`,
-    );
-    assert(/KOOKA/i.test(text), "staff login page content is incomplete");
-    return "login form is reachable";
-  });
-
   if (configuration.previewPassword) {
     await check("Maintenance preview authentication", async () => {
       const body = new URLSearchParams({
@@ -258,6 +225,52 @@ export async function runSmokeTests(configuration, fetchImpl = fetch) {
       return "protected production preview opened";
     });
   }
+
+  await check("Read-only room availability", async () => {
+    const query = new URLSearchParams({
+      checkInDate: dateInJakarta(1),
+      checkoutDate: dateInJakarta(2),
+      rooms: "1",
+      adults: "2",
+      children: "0",
+      infants: "0",
+    });
+    const response = await request(`/api/booking/availability?${query}`, {
+      headers: previewCookie ? { cookie: previewCookie } : undefined,
+    });
+    const { json, text } = await responsePayload(response);
+    const blockedByMaintenance =
+      response.status === 503 &&
+      (json?.error?.code === "SERVICE_UNAVAILABLE" ||
+        /under maintenance|currently under maintenance/i.test(text));
+    if (
+      blockedByMaintenance &&
+      !previewCookie &&
+      configuration.expectedMaintenance !== "off"
+    ) {
+      return "public booking search is blocked as expected during maintenance";
+    }
+    assert(
+      response.status === 200,
+      `availability API returned HTTP ${response.status}`,
+    );
+    assert(
+      json && typeof json === "object",
+      "availability API did not return JSON",
+    );
+    return "search completed without creating a booking";
+  });
+
+  await check("Staff login page", async () => {
+    const response = await request("/staff/login");
+    const { text } = await responsePayload(response);
+    assert(
+      response.status === 200,
+      `staff login returned HTTP ${response.status}`,
+    );
+    assert(/KOOKA/i.test(text), "staff login page content is incomplete");
+    return "login form is reachable";
+  });
 
   await check("Public website state", async () => {
     const response = await request("/", {
