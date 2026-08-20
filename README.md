@@ -238,4 +238,10 @@ PostgreSQL tersedia di `127.0.0.1:55432`, Redis di `127.0.0.1:56379`, Mailpit SM
 
 Gunakan `npm run db:status` untuk melihat applied/pending/checksum mismatch dan `npm run db:test` untuk verifikasi penuh pada database disposable. Endpoint application health tersedia pada `GET /api/health`.
 
+Setelah aplikasi berjalan atau selesai di-deploy, jalankan `npm run smoke`
+untuk local atau `npm run smoke:production` untuk production. Pemeriksaan ini
+read-only dan mencakup aplikasi, database, indikator worker/outbox, konten,
+ketersediaan, login staf, dan keadaan landing/maintenance. Konfigurasi lengkap
+tersedia di [Automated Smoke Test](docs/SMOKE-TEST.md).
+
 - Fitur baru setelah baseline memerlukan change request; perubahan nilai konfigurasi yang tidak memperluas fitur tetap mengikuti checklist dan approval policy.
